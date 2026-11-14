@@ -299,6 +299,56 @@ export async function verifyPayment(
     throw err;
   }
 
+  // Record execution state separately from mismatched payment terms.
+  const executionState = z
+    .object({
+      final_execution_status: z.string(),
+      transaction: z.object({
+        hash: z.literal(hash),
+        signer_id: z.literal(sender),
+      }),
+      status: z.unknown(),
+    })
+    .safeParse(raw);
+  if (
+    executionState.success &&
+    executionState.data.final_execution_status !== "FINAL"
+  ) {
+    await upsertAttempt(
+      db,
+      invoice.id,
+      hash,
+      sender,
+      "pending",
+      "pending_confirmation",
+    );
+    throw new RequestError(
+      422,
+      "pending_confirmation",
+      "Transfer is awaiting final confirmation. Retry verification.",
+    );
+  }
+  if (
+    executionState.success &&
+    z
+      .object({ Failure: z.unknown() })
+      .refine((value) => "Failure" in value)
+      .safeParse(executionState.data.status).success
+  ) {
+    await upsertAttempt(
+      db,
+      invoice.id,
+      hash,
+      sender,
+      "failed",
+      "execution_failed",
+    );
+    throw new RequestError(
+      422,
+      "execution_failed",
+      "The transfer failed onchain.",
+    );
+  }
   const parsed = evidenceSchema.safeParse(raw);
   const mismatch = async (code?: string) => {
     await upsertAttempt(
@@ -623,4 +673,62 @@ export async function verifyRefund(
   if (saved.error) throw saved.error;
 
   return formatOverpayment(saved.data, invoice);
+}
+
+// A public lookup projects only evidence for the exact invoice/hash pair.
+export async function lookupTransfer(token: string, hash: string) {
+  const invoice = await paymentInvoice(token);
+  const db = database();
+  const limit = await db.rpc("consume_lookup", { p_invoice: invoice.id });
+  if (limit.error) throw limit.error;
+  if (!limit.data)
+    throw new RequestError(
+      429,
+      "lookup_rate_limit",
+      "Too many lookups for this invoice. Try again in a minute.",
+    );
+  const payment = await db
+    .from("verified_payments")
+    .select("*")
+    .eq("invoice_id", invoice.id)
+    .eq("transaction_hash", hash)
+    .maybeSingle();
+  if (payment.error) throw payment.error;
+  if (payment.data) {
+    const p = payment.data;
+    return {
+      status: "verified",
+      transactionHash: hash,
+      classification: p.applied ? "applied" : "overpayment",
+      details: receipt(invoice, p),
+      refundStatus: p.applied ? null : p.refund_status || "refund_needed",
+      refund:
+        p.refund_status === "refunded"
+          ? {
+              transactionHash: p.refund_hash,
+              blockTimestamp: p.refund_timestamp,
+              explorerUrl: `https://testnet.nearblocks.io/txns/${p.refund_hash}`,
+            }
+          : null,
+    };
+  }
+  const attempt = await db
+    .from("payment_attempts")
+    .select("outcome,error_code")
+    .eq("invoice_id", invoice.id)
+    .eq("transaction_hash", hash)
+    .maybeSingle();
+  if (attempt.error) throw attempt.error;
+  if (!attempt.data)
+    throw new RequestError(
+      404,
+      "transfer_not_found",
+      "No recorded transfer with this hash for this invoice.",
+    );
+  return {
+    status: attempt.data.outcome,
+    transactionHash: hash,
+    errorCode: attempt.data.error_code,
+    classification: null,
+  };
 }

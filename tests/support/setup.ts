@@ -270,6 +270,23 @@ export default async function setup(project: TestProject) {
           send(res, {});
           return;
         }
+        if (url.pathname === "/__admin-create") {
+          try {
+            await client!.query("begin");
+            await client!.query(
+              "insert into auth.users(id,email) values ('55555555-5555-4555-8555-555555555555','invite@example.test')",
+            );
+            await client!.query(
+              `update auth.users set raw_app_meta_data = '{"settiva_invited":true}' where id = '55555555-5555-4555-8555-555555555555'`,
+            );
+            await client!.query("commit");
+            send(res, { created: true });
+          } catch {
+            await client!.query("rollback");
+            send(res, { message: "Database error creating new user" }, 500);
+          }
+          return;
+        }
         if (url.pathname === "/auth/v1/signup") {
           try {
             await client!.query(

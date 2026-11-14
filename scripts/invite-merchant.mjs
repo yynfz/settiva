@@ -49,16 +49,32 @@ if (password.length < 12)
 const client = createClient(url, key, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
-const { error } = await client.auth.admin.createUser({
+const { data, error } = await client.auth.admin.createUser({
   email,
   password,
   email_confirm: true,
   app_metadata: { settiva_invited: true },
 });
-if (error)
+if (error) {
+  const status = error.status ? `HTTP ${error.status}` : "unknown HTTP status";
+  const code = error.code ? ` [${error.code}]` : "";
+  const detail = error.message || "Supabase returned no error message.";
   throw new Error(
-    `Provisioning failed (${error.code || error.status || "unknown"}). Check that the migration is applied and the email is not already registered.`,
+    `Supabase could not create the invited merchant (${status}${code}): ${detail}\nFor database creation errors, apply supabase/migrations/202611140006_fix_merchant_invitations.sql, then inspect Auth logs if the error persists. Check the Auth user list before retrying.`,
   );
+}
+if (!data.user)
+  throw new Error(
+    "Supabase returned success without a user record. Check the Auth logs before retrying.",
+  );
+const { error: accessError } = await client
+  .from("merchant_access")
+  .upsert({ user_id: data.user.id });
+if (accessError) {
+  throw new Error(
+    `User created but failed to grant merchant access: ${accessError.message}`,
+  );
+}
 console.log(
   "Invited merchant provisioned. Deliver the credentials through your existing private channel. No email was sent.",
 );

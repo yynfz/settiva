@@ -62,3 +62,11 @@ Verification accepts the portal identifier, transaction hash, and claimed sender
 Verified receipts appear in the portal and can be downloaded from `/api/portal/[token]/receipt/pdf`. Merchants use the authenticated `/api/invoices/[id]/receipt/pdf` endpoint. Receipt evidence and the paid state survive later verification failures. The payment tests use real isolated PostgreSQL/RLS with controlled RPC and a test wallet injected through NEAR Connect's external interface; they do not prove a live funded transfer. No hosted migration, funding, signing, or deployment was performed for this implementation.
 
 Current integration references: [NEAR Connect wallet guidance](https://docs.near.org/web3-apps/tutorials/wallet-login), [NEAR transaction finality and RPC](https://docs.near.org/api/rpc/transactions). Wallet Selector is deprecated in the current NEAR guidance; this implementation uses `@hot-labs/near-connect`.
+
+## Transfer lookup and invitation repair (#8)
+
+Payers can open `/portal/[token]/lookup` and enter a known payment hash to view only that transfer's attempt or verified-payment evidence, classification, and verified refund status. The download contains that transfer's receipt. Lookup is read-only and grants no refund rights. Queries and downloads share a persistent limit of 30 requests per invoice per minute.
+
+For `Database error creating new user` from `merchant:invite`, apply `supabase/migrations/202611140006_fix_merchant_invitations.sql` in the hosted project's SQL Editor, then retry the invite command. Supabase admin creation inserts the Auth row before assigning application metadata inside the same transaction. The original immediate trigger rejected that intermediate row. The repair checks the final row at transaction completion and grants access only for explicit trusted invitation metadata or an Auth invitation. It does not accept email confirmation as an invitation. The regression reproduces this insert/update sequence against real isolated PostgreSQL; a hosted retry is still required after applying the migration.
+
+Apply `202611150001_public_lookup.sql` to enable lookup throttling. These migrations were tested locally; they are not automatically applied to hosted Supabase.

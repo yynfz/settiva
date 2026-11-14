@@ -282,6 +282,9 @@ export default async function CustomerPortalPage({
             </a>
           </section>
         )}
+        <a className="block mt-6 underline" href={`/portal/${token}/lookup`}>
+          Look up a transfer
+        </a>
         {/* Footer */}
         <footer className="text-center text-xs text-[#8c9c90] mt-8">
           Settiva • Powered by InvoiceShelf architecture & NEAR Protocol
