@@ -43,21 +43,28 @@ echo "Local check (bypasses DNS/TLS):"
 curl -s -o /dev/null -w "  http://127.0.0.1:8096 -> %{http_code}\n" http://127.0.0.1:8096/ || true
 
 resolved=$(dig +short "$DOMAIN" A @1.1.1.1 | tail -1)
-if [[ "$resolved" != "$VPS_IP" ]]; then
+if [[ -z "$resolved" ]]; then
   echo
-  echo "Public check skipped: $DOMAIN resolves to '${resolved:-nothing}', not $VPS_IP."
+  echo "Public check skipped: $DOMAIN has no A record yet."
   echo "Add the DNS record (A $DOMAIN -> $VPS_IP), then the certificate issues on the next request."
   exit 0
 fi
+if [[ "$resolved" != "$VPS_IP" ]]; then
+  echo
+  echo "Public check skipped: $DOMAIN resolves to $resolved, not $VPS_IP."
+  exit 0
+fi
 
-echo "Public check (traefik re-registers the container for a second or two):"
-for i in {1..10}; do
-  code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN/" || true)
+# Resolve explicitly against the public IP: this VPS's own resolver can keep
+# serving a stale/NXDOMAIN answer long after public DNS has moved.
+echo "Public check (traefik may need a moment for the certificate):"
+for i in {1..30}; do
+  code=$(curl -s -o /dev/null -w '%{http_code}' --resolve "$DOMAIN:443:$VPS_IP" "https://$DOMAIN/" || true)
   if [[ "$code" == "200" ]]; then
     echo "  https://$DOMAIN -> 200"
     exit 0
   fi
-  sleep 2
+  sleep 3
 done
 echo "  https://$DOMAIN -> ${code:-no response} (not 200 yet)"
 exit 1
