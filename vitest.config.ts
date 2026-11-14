@@ -4,7 +4,11 @@ export default defineConfig({
     include:
       process.env.SETTIVA_TEST_ASSET === "test-token"
         ? ["tests/fallback.http.test.ts"]
-        : ["tests/merchant*.test.ts"],
+        : ["tests/*.test.ts"],
+    exclude:
+      process.env.SETTIVA_TEST_ASSET === "test-token"
+        ? []
+        : ["tests/fallback.http.test.ts", "**/node_modules/**", "**/.git/**"],
     globalSetup: ["./tests/support/setup.ts"],
     fileParallelism: false,
     testTimeout: 30_000,

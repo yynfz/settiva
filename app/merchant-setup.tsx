@@ -6,7 +6,12 @@ import {
   type SupabaseClient,
 } from "@supabase/supabase-js";
 import { useEffect, useState, type FormEvent } from "react";
-import type { MerchantSetup, StorageGuidance } from "../lib/contracts";
+import type {
+  CreateInvoiceItemInput,
+  Invoice,
+  MerchantSetup,
+  StorageGuidance,
+} from "../lib/contracts";
 
 export function MerchantApp({
   url,
@@ -18,6 +23,7 @@ export function MerchantApp({
   const [auth] = useState(() => createClient(url, publishableKey));
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+
   useEffect(() => {
     const {
       data: { subscription },
@@ -27,6 +33,7 @@ export function MerchantApp({
     });
     return () => subscription.unsubscribe();
   }, [auth]);
+
   return (
     <>
       <header className="topbar">
@@ -57,7 +64,7 @@ export function MerchantApp({
           <p>
             A direct path from your client's wallet to yours.
             <br />
-            Start with the account where you'll receive payments.
+            Issue itemized invoices and settle on NEAR.
           </p>
           <div className="trust-note">
             <span aria-hidden="true">↗</span>
@@ -74,7 +81,7 @@ export function MerchantApp({
             <p role="status">Loading your session…</p>
           </section>
         ) : session ? (
-          <AccountSetup key={session.user.id} session={session} />
+          <MerchantDashboard key={session.user.id} session={session} />
         ) : (
           <SignIn auth={auth} />
         )}
@@ -86,9 +93,11 @@ export function MerchantApp({
     </>
   );
 }
+
 function SignIn({ auth }: { auth: SupabaseClient }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -107,6 +116,7 @@ function SignIn({ auth }: { auth: SupabaseClient }) {
       setBusy(false);
     }
   }
+
   return (
     <section className="card">
       <span className="eyebrow">MERCHANT ACCESS</span>
@@ -146,7 +156,61 @@ function SignIn({ auth }: { auth: SupabaseClient }) {
     </section>
   );
 }
-function AccountSetup({ session }: { session: Session }) {
+
+function MerchantDashboard({ session }: { session: Session }) {
+  const [setup, setSetup] = useState<MerchantSetup | null>(null);
+  const [activeTab, setActiveTab] = useState<"invoices" | "account">("account");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      {setup?.profile && (
+        <div className="nav-tabs" role="tablist">
+          <button
+            role="tab"
+            aria-selected={activeTab === "invoices"}
+            className={`tab-btn ${activeTab === "invoices" ? "active" : ""}`}
+            onClick={() => setActiveTab("invoices")}
+          >
+            Invoices
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "account"}
+            className={`tab-btn ${activeTab === "account" ? "active" : ""}`}
+            onClick={() => setActiveTab("account")}
+          >
+            Receiving Account
+          </button>
+        </div>
+      )}
+
+      {/* Account Setup View */}
+      <div
+        style={{
+          display:
+            activeTab === "account" || !setup?.profile ? "block" : "none",
+        }}
+      >
+        <AccountSetup session={session} onSetupLoaded={setSetup} />
+      </div>
+
+      {/* Invoices View */}
+      {setup?.profile && (
+        <div style={{ display: activeTab === "invoices" ? "block" : "none" }}>
+          <InvoiceManager session={session} setup={setup} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AccountSetup({
+  session,
+  onSetupLoaded,
+}: {
+  session: Session;
+  onSetupLoaded?: (setup: MerchantSetup) => void;
+}) {
   const [setup, setSetup] = useState<MerchantSetup | null>(null);
   const [displayName, setDisplayName] = useState("");
   const [account, setAccount] = useState("");
@@ -155,6 +219,7 @@ function AccountSetup({ session }: { session: Session }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [guidance, setGuidance] = useState<StorageGuidance | null>(null);
+
   useEffect(() => {
     const controller = new AbortController();
     void fetch("/api/merchant", {
@@ -166,6 +231,7 @@ function AccountSetup({ session }: { session: Session }) {
         if (!response.ok)
           throw new Error(data.error || "Unable to load merchant setup.");
         setSetup(data);
+        onSetupLoaded?.(data);
         setDisplayName(data.profile?.display_name || "");
         setAccount(data.profile?.testnet_wallet_id || "");
       })
@@ -178,7 +244,8 @@ function AccountSetup({ session }: { session: Session }) {
           );
       });
     return () => controller.abort();
-  }, [session.access_token]);
+  }, [session.access_token, onSetupLoaded]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
@@ -206,6 +273,7 @@ function AccountSetup({ session }: { session: Session }) {
         return;
       }
       setSetup(data);
+      onSetupLoaded?.(data);
       setConfirmed(false);
       setMessage(
         "Receiving account saved. Account, token metadata, and storage checks passed.",
@@ -216,6 +284,7 @@ function AccountSetup({ session }: { session: Session }) {
       setBusy(false);
     }
   }
+
   return (
     <section className="card">
       <div className="card-heading">
@@ -344,6 +413,388 @@ function AccountSetup({ session }: { session: Session }) {
         approval and NEAR deposit may be needed; transfers also require NEAR for
         gas.
       </p>
+    </section>
+  );
+}
+
+function InvoiceManager({
+  session,
+  setup,
+}: {
+  session: Session;
+  setup: MerchantSetup;
+}) {
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Form state
+  const [clientLabel, setClientLabel] = useState("");
+  const [description, setDescription] = useState("");
+  const [dueDate, setDueDate] = useState("");
+  const [items, setItems] = useState<CreateInvoiceItemInput[]>([
+    { description: "", quantity: 1, unitPrice: "" },
+  ]);
+  const [formBusy, setFormBusy] = useState(false);
+  const [formError, setFormError] = useState("");
+
+  async function loadInvoices() {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/invoices", {
+        headers: { authorization: `Bearer ${session.access_token}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load invoices");
+      setInvoices(data.invoices || []);
+    } catch (err: any) {
+      setError(err.message || "Failed to load invoices");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void loadInvoices();
+  }, [session.access_token]);
+
+  function addItem() {
+    setItems([...items, { description: "", quantity: 1, unitPrice: "" }]);
+  }
+
+  function removeItem(index: number) {
+    if (items.length > 1) {
+      setItems(items.filter((_, i) => i !== index));
+    }
+  }
+
+  function updateItem(
+    index: number,
+    field: keyof CreateInvoiceItemInput,
+    value: string | number,
+  ) {
+    const updated = [...items];
+    updated[index] = { ...updated[index], [field]: value };
+    setItems(updated);
+  }
+
+  const calculatedTotal = items.reduce((sum, item) => {
+    const qty = Number(item.quantity) || 0;
+    const price = parseFloat(item.unitPrice) || 0;
+    return sum + qty * price;
+  }, 0);
+
+  async function handleCreateInvoice(e: FormEvent) {
+    e.preventDefault();
+    setFormBusy(true);
+    setFormError("");
+
+    try {
+      const res = await fetch("/api/invoices", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${session.access_token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          clientLabel,
+          description: description || undefined,
+          dueDate: dueDate || undefined,
+          items: items.map((it) => ({
+            description: it.description,
+            quantity: Number(it.quantity),
+            unitPrice: it.unitPrice,
+          })),
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Failed to create invoice");
+      }
+
+      setCreating(false);
+      setClientLabel("");
+      setDescription("");
+      setDueDate("");
+      setItems([{ description: "", quantity: 1, unitPrice: "" }]);
+      await loadInvoices();
+    } catch (err: any) {
+      setFormError(err.message || "Failed to create invoice");
+    } finally {
+      setFormBusy(false);
+    }
+  }
+
+  async function copyPortalLink(invoice: Invoice) {
+    try {
+      await navigator.clipboard.writeText(invoice.portal_url);
+      setCopiedId(invoice.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    } catch {
+      // Fallback
+      prompt("Copy Customer Portal link:", invoice.portal_url);
+    }
+  }
+
+  return (
+    <section className="card">
+      <div className="invoice-toolbar">
+        <div>
+          <span className="eyebrow">INVOICE MANAGEMENT</span>
+          <h2>{creating ? "New Invoice" : "Your Invoices"}</h2>
+        </div>
+        <button
+          className="btn-sm btn-primary"
+          onClick={() => {
+            setCreating(!creating);
+            setFormError("");
+          }}
+        >
+          {creating ? "← Back to List" : "+ Create Invoice"}
+        </button>
+      </div>
+
+      {creating ? (
+        <form onSubmit={handleCreateInvoice}>
+          <p className="muted" style={{ marginBottom: "16px" }}>
+            Create an itemized invoice. Terms are immutable once issued.
+          </p>
+
+          <label htmlFor="clientLabel">Client Label (Private)</label>
+          <input
+            id="clientLabel"
+            value={clientLabel}
+            onChange={(e) => setClientLabel(e.target.value)}
+            placeholder="e.g. Acme Studio - Q4 Design"
+            required
+            maxLength={100}
+          />
+          <p className="field-hint">Visible only to you for organization.</p>
+
+          <label htmlFor="invDescription">Internal Notes (Optional)</label>
+          <input
+            id="invDescription"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Project milestone 1 delivery"
+            maxLength={1000}
+          />
+
+          <label htmlFor="dueDate">Advisory Due Date (Optional)</label>
+          <input
+            id="dueDate"
+            type="date"
+            value={dueDate}
+            onChange={(e) => setDueDate(e.target.value)}
+          />
+
+          <div style={{ marginTop: "24px" }}>
+            <span className="eyebrow">LINE ITEMS</span>
+            <table className="items-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "50%" }}>Description</th>
+                  <th style={{ width: "15%" }}>Qty</th>
+                  <th style={{ width: "20%" }}>Price ({setup.asset.symbol})</th>
+                  <th style={{ width: "15%" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, idx) => (
+                  <tr key={idx}>
+                    <td>
+                      <input
+                        placeholder="Service or item description"
+                        value={item.description}
+                        onChange={(e) =>
+                          updateItem(idx, "description", e.target.value)
+                        }
+                        required
+                        maxLength={200}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        min="0.0001"
+                        step="any"
+                        value={item.quantity}
+                        onChange={(e) =>
+                          updateItem(
+                            idx,
+                            "quantity",
+                            parseFloat(e.target.value) || 0,
+                          )
+                        }
+                        required
+                      />
+                    </td>
+                    <td>
+                      <input
+                        placeholder="10.00"
+                        value={item.unitPrice}
+                        onChange={(e) =>
+                          updateItem(idx, "unitPrice", e.target.value)
+                        }
+                        required
+                      />
+                    </td>
+                    <td>
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          className="btn-sm"
+                          onClick={() => removeItem(idx)}
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+
+            <button
+              type="button"
+              className="btn-sm"
+              onClick={addItem}
+              style={{ marginTop: "8px" }}
+            >
+              + Add Line Item
+            </button>
+          </div>
+
+          <div
+            style={{
+              marginTop: "20px",
+              padding: "16px",
+              background: "#f4f7f2",
+              borderRadius: "8px",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+            }}
+          >
+            <strong>Total Amount:</strong>
+            <span style={{ fontSize: "18px", fontWeight: "700" }}>
+              {calculatedTotal.toFixed(2)} {setup.asset.symbol}
+            </span>
+          </div>
+
+          {formError && (
+            <p
+              role="alert"
+              className="notice error"
+              style={{ marginTop: "16px" }}
+            >
+              {formError}
+            </p>
+          )}
+
+          <button
+            className="primary"
+            disabled={formBusy}
+            style={{ marginTop: "20px" }}
+          >
+            {formBusy ? "Creating invoice…" : "Create and freeze invoice ↗"}
+          </button>
+        </form>
+      ) : (
+        <div>
+          {loading && <p role="status">Loading your invoices…</p>}
+          {error && (
+            <p role="alert" className="notice error">
+              {error}
+            </p>
+          )}
+
+          {!loading && invoices.length === 0 && (
+            <div className="empty-state">
+              <h3>No invoices yet</h3>
+              <p>
+                Create your first itemized invoice to start receiving payments.
+              </p>
+              <button
+                className="btn-sm btn-primary"
+                onClick={() => setCreating(true)}
+              >
+                Create Invoice
+              </button>
+            </div>
+          )}
+
+          <div className="invoice-list">
+            {invoices.map((inv) => (
+              <div key={inv.id} className="invoice-card">
+                <div className="invoice-card-main">
+                  <div className="invoice-card-header">
+                    <span className="invoice-num">{inv.invoice_number}</span>
+                    <span
+                      className={`status-pill ${
+                        inv.status === "paid"
+                          ? "paid"
+                          : inv.is_overdue
+                            ? "overdue"
+                            : inv.status === "viewed"
+                              ? "viewed"
+                              : "unpaid"
+                      }`}
+                    >
+                      {inv.is_overdue && inv.status !== "paid"
+                        ? "OVERDUE"
+                        : inv.status}
+                    </span>
+                  </div>
+                  <span className="invoice-client">{inv.client_label}</span>
+                  {inv.due_date && (
+                    <small style={{ color: "var(--muted)", fontSize: "11px" }}>
+                      Due: {inv.due_date}
+                    </small>
+                  )}
+                </div>
+
+                <div className="invoice-card-meta">
+                  <div className="invoice-amount">
+                    {inv.amount_display} {inv.asset_symbol}
+                  </div>
+                  <div className="invoice-actions">
+                    <button
+                      className="btn-sm"
+                      onClick={() => copyPortalLink(inv)}
+                      title="Copy Customer Portal link"
+                    >
+                      {copiedId === inv.id ? "✓ Copied!" : "Copy Link"}
+                    </button>
+                    <a
+                      href={`/api/invoices/${inv.id}/pdf`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-sm"
+                      title="Download PDF"
+                    >
+                      PDF
+                    </a>
+                    <a
+                      href={inv.portal_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-sm"
+                      title="Open Customer Portal"
+                    >
+                      Portal ↗
+                    </a>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }

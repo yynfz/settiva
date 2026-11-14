@@ -2,13 +2,11 @@
 
 ### Issue tracker
 
-Issues and specs live in GitHub Issues in `yynfz/settiva`.
-Read `docs/agents/issue-tracker.md` before tracker operations.
+Issues and specs live in GitHub Issues in `yynfz/settiva`. See `docs/agents/issue-tracker.md`.
 
 ### Domain docs
 
-Single-context layout. Read `docs/agents/domain.md`
-before exploring domain concepts or architectural decisions.
+Single-context layout (`GLOSSARY.md` at repo root, ADRs in `docs/adr/`). See `docs/agents/domain.md`.
 
 <!-- BEGIN:nextjs-agent-rules -->
 
