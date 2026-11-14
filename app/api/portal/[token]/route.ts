@@ -1,5 +1,10 @@
 import { NextRequest } from "next/server";
 import { getPublicInvoiceByToken } from "@/lib/server/invoices";
+import {
+  appliedReceipt,
+  paymentInvoice,
+  pendingAttempts,
+} from "@/lib/server/payments";
 import { failure, respond } from "@/lib/server/merchant";
 
 export async function GET(
@@ -8,8 +13,18 @@ export async function GET(
 ) {
   try {
     const { token } = await context.params;
-    const publicInvoice = await getPublicInvoiceByToken(token);
-    return respond({ invoice: publicInvoice });
+    const [publicInvoice, invoice] = await Promise.all([
+      getPublicInvoiceByToken(token),
+      paymentInvoice(token).catch(() => null),
+    ]);
+    const [receipt, pending] = invoice
+      ? await Promise.all([appliedReceipt(invoice), pendingAttempts(token)])
+      : [null, []];
+    return respond({
+      invoice: publicInvoice,
+      receipt,
+      pendingAttempts: pending,
+    });
   } catch (error) {
     return failure(error);
   }

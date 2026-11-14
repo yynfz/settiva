@@ -189,6 +189,7 @@ export default async function setup(project: TestProject) {
         const url = new URL(req.url!, `http://127.0.0.1:${externalPort}`);
         if (url.pathname === "/__reset") {
           rpcScenario = "ready";
+          transactionEvidence = undefined;
           await client!.query("delete from public.merchant_profiles");
           send(res, {});
           return;

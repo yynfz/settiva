@@ -131,6 +131,84 @@ const evidenceSchema = z.object({
     )
     .min(1),
 });
+// Rate limit: max 10 distinct attempt hashes per invoice within 10 minutes.
+const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+const RATE_LIMIT_MAX = 10;
+
+async function enforceRateLimit(
+  db: ReturnType<typeof database>,
+  invoiceId: string,
+  hash: string,
+) {
+  // Resuming verification for an already-submitted hash is never rate-limited.
+  const { data: existingAttempt } = await db
+    .from("payment_attempts")
+    .select("id")
+    .eq("invoice_id", invoiceId)
+    .eq("transaction_hash", hash)
+    .maybeSingle();
+  if (existingAttempt) return;
+
+  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
+  const result = await db
+    .from("payment_attempts")
+    .select("id")
+    .eq("invoice_id", invoiceId)
+    .neq("transaction_hash", hash)
+    .gte("created_at", windowStart);
+  if (result.error) {
+    // If we can't count attempts, fail open (don't block the payer).
+    console.error("[rate-limit] count failed:", result.error.message);
+    return;
+  }
+  const count = result.data?.length ?? 0;
+  if (count >= RATE_LIMIT_MAX)
+    throw new RequestError(
+      429,
+      "rate_limited",
+      "Too many verification attempts. Wait before retrying.",
+    );
+}
+
+async function upsertAttempt(
+  db: ReturnType<typeof database>,
+  invoiceId: string,
+  hash: string,
+  sender: string,
+  outcome: "pending" | "verified" | "failed" | "mismatch" | "rpc_unavailable",
+  errorCode?: string,
+) {
+  // Insert-or-update: insert first attempt as pending; subsequent calls update outcome.
+  const { error } = await db.from("payment_attempts").upsert(
+    {
+      invoice_id: invoiceId,
+      transaction_hash: hash,
+      sender_account: sender,
+      outcome,
+      error_code: errorCode ?? null,
+      resolved_at: outcome !== "pending" ? new Date().toISOString() : null,
+    },
+    { onConflict: "invoice_id,transaction_hash", ignoreDuplicates: false },
+  );
+  // Log silently — attempt persistence must not block or override a payment error.
+  if (error) console.error("[attempt] upsert failed:", error.message);
+}
+
+// Recoverable outcomes: the payer can retry verification for these on page reload.
+const RECOVERABLE: string[] = ["pending", "rpc_unavailable"];
+
+export async function pendingAttempts(token: string) {
+  const invoice = await paymentInvoice(token);
+  const { data, error } = await database()
+    .from("payment_attempts")
+    .select("transaction_hash,sender_account,outcome,error_code,created_at")
+    .eq("invoice_id", invoice.id)
+    .in("outcome", RECOVERABLE)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return data ?? [];
+}
+
 export async function verifyPayment(
   token: string,
   hash: string,
@@ -138,6 +216,8 @@ export async function verifyPayment(
 ) {
   const invoice = await paymentInvoice(token);
   const db = database();
+
+  // Idempotency: return stable result for already-verified hashes.
   const { data: existing, error } = await db
     .from("verified_payments")
     .select("*")
@@ -155,45 +235,103 @@ export async function verifyPayment(
         "payment_mismatch",
         "Transfer does not match this invoice and sender.",
       );
+    await upsertAttempt(db, invoice.id, hash, sender, "verified");
     return {
       receipt: await appliedReceipt(invoice),
       classification: existing.applied ? "applied" : "overpayment",
     };
   }
-  const chain = await rpc("status", []);
-  if (chain.chain_id !== "testnet")
+
+  // Rate limit: guard against hash-enumeration spam on new submissions.
+  await enforceRateLimit(db, invoice.id, hash);
+
+  // Persist the attempt as pending before hitting the RPC so the payer
+  // can find it on page reload even if the connection drops.
+  await upsertAttempt(db, invoice.id, hash, sender, "pending");
+
+  let chain: { chain_id: string };
+  try {
+    chain = await rpc("status", []);
+  } catch (err) {
+    await upsertAttempt(
+      db,
+      invoice.id,
+      hash,
+      sender,
+      "rpc_unavailable",
+      "rpc_unavailable",
+    );
+    throw err;
+  }
+
+  if (chain.chain_id !== "testnet") {
+    await upsertAttempt(
+      db,
+      invoice.id,
+      hash,
+      sender,
+      "rpc_unavailable",
+      "wrong_network",
+    );
     throw new RequestError(
       503,
       "wrong_network",
       "Verification RPC is not testnet.",
     );
-  const raw = await rpc("tx", {
-    tx_hash: hash,
-    sender_account_id: sender,
-    wait_until: "FINAL",
-  });
+  }
+
+  let raw: unknown;
+  try {
+    raw = await rpc("tx", {
+      tx_hash: hash,
+      sender_account_id: sender,
+      wait_until: "FINAL",
+    });
+  } catch (err) {
+    await upsertAttempt(
+      db,
+      invoice.id,
+      hash,
+      sender,
+      "rpc_unavailable",
+      "rpc_unavailable",
+    );
+    throw err;
+  }
+
   const parsed = evidenceSchema.safeParse(raw);
-  const mismatch = () =>
-    new RequestError(
+  const mismatch = async (code?: string) => {
+    await upsertAttempt(
+      db,
+      invoice.id,
+      hash,
+      sender,
+      "mismatch",
+      code ?? "payment_mismatch",
+    );
+    return new RequestError(
       422,
       "payment_mismatch",
       "No finalized, successful transfer matching this invoice was verified.",
     );
-  if (!parsed.success) throw mismatch();
+  };
+
+  if (!parsed.success) throw await mismatch();
   const tx = parsed.data.transaction;
   if (
     tx.hash !== hash ||
     tx.signer_id !== sender ||
     tx.receiver_id !== invoice.token_contract_id
   )
-    throw mismatch();
+    throw await mismatch();
+
   let args: unknown;
   try {
     args = JSON.parse(
       Buffer.from(tx.actions[0].FunctionCall.args, "base64").toString("utf8"),
     );
   } catch {
-    throw mismatch();
+    throw await mismatch();
   }
   const expected = z
     .object({
@@ -202,7 +340,8 @@ export async function verifyPayment(
       memo: z.literal(invoice.payment_reference),
     })
     .strict();
-  if (!expected.safeParse(args).success) throw mismatch();
+  if (!expected.safeParse(args).success) throw await mismatch("wrong_args");
+
   const execution = parsed.data.receipts_outcome.find(
     (item) =>
       item.id ===
@@ -213,15 +352,33 @@ export async function verifyPayment(
     execution.outcome.executor_id !== invoice.token_contract_id ||
     !("SuccessValue" in execution.outcome.status)
   )
-    throw mismatch();
-  const block = z
-    .object({
-      header: z.object({
-        hash: z.literal(execution.block_hash),
-        timestamp_nanosec: z.string().regex(/^\d+$/),
-      }),
-    })
-    .parse(await rpc("block", { block_id: execution.block_hash }));
+    throw await mismatch("receipt_failure");
+
+  let block: { header: { hash: string; timestamp_nanosec: string } };
+  try {
+    block = z
+      .object({
+        header: z.object({
+          hash: z.literal(execution.block_hash),
+          timestamp_nanosec: z.string().regex(/^\d+$/),
+        }),
+      })
+      .parse(await rpc("block", { block_id: execution.block_hash }));
+  } catch (err) {
+    if (err instanceof RequestError) {
+      await upsertAttempt(
+        db,
+        invoice.id,
+        hash,
+        sender,
+        "rpc_unavailable",
+        "rpc_unavailable",
+      );
+      throw err;
+    }
+    throw await mismatch("block_unavailable");
+  }
+
   const timestamp = new Date(
     Number(BigInt(block.header.timestamp_nanosec) / 1000000n),
   ).toISOString();
@@ -233,6 +390,7 @@ export async function verifyPayment(
     p_timestamp: timestamp,
   });
   if (saved.error) throw saved.error;
+  await upsertAttempt(db, invoice.id, hash, sender, "verified");
   return {
     receipt: await appliedReceipt(invoice),
     classification: saved.data.applied ? "applied" : "overpayment",

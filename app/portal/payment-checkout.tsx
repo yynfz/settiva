@@ -1,15 +1,25 @@
 "use client";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { NearConnector } from "@hot-labs/near-connect";
 import type { PublicInvoice } from "@/lib/contracts";
 
+type PendingAttempt = {
+  transaction_hash: string;
+  sender_account: string;
+  outcome: string;
+  error_code: string | null;
+  created_at: string;
+};
+
 export function PaymentCheckout({
   token,
   invoice,
+  pendingAttempts = [],
 }: {
   token: string;
   invoice: PublicInvoice;
+  pendingAttempts?: PendingAttempt[];
 }) {
   const router = useRouter();
   const connector = useRef<NearConnector | null>(null);
@@ -19,6 +29,49 @@ export function PaymentCheckout({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [submitted, setSubmitted] = useState(false);
+
+  // Auto-resume verification for any pending attempts on page load.
+  const retried = useRef<Set<string>>(new Set());
+  const verify = useCallback(
+    async (transactionHash = hash, senderAccount = sender) => {
+      setBusy(true);
+      setMessage("Checking final settlement…");
+      try {
+        const response = await fetch(`/api/portal/${token}/verify`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ transactionHash, senderAccount }),
+        });
+        const result = await response.json();
+        if (!response.ok)
+          throw new Error(result.error || "Verification unavailable.");
+        setMessage(
+          result.classification === "overpayment"
+            ? "An additional matching payment was received. The original receipt remains unchanged; contact the merchant about a refund."
+            : "Payment verified.",
+        );
+        router.refresh();
+      } catch (error) {
+        setMessage(
+          `${error instanceof Error ? error.message : "Verification unavailable."} Retry verification rather than sending another payment.`,
+        );
+      } finally {
+        setBusy(false);
+      }
+    },
+    [hash, sender, token, router],
+  );
+
+  useEffect(() => {
+    if (pendingAttempts.length === 0) return;
+    const first = pendingAttempts.find(
+      (a) => !retried.current.has(a.transaction_hash),
+    );
+    if (!first) return;
+    retried.current.add(first.transaction_hash);
+    void verify(first.transaction_hash, first.sender_account);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function connect() {
     setBusy(true);
     setMessage("");
@@ -44,32 +97,7 @@ export function PaymentCheckout({
       setBusy(false);
     }
   }
-  async function verify(transactionHash = hash, senderAccount = sender) {
-    setBusy(true);
-    setMessage("Checking final settlement…");
-    try {
-      const response = await fetch(`/api/portal/${token}/verify`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ transactionHash, senderAccount }),
-      });
-      const result = await response.json();
-      if (!response.ok)
-        throw new Error(result.error || "Verification unavailable.");
-      setMessage(
-        result.classification === "overpayment"
-          ? "An additional matching payment was received. The original receipt remains unchanged; contact the merchant about a refund."
-          : "Payment verified.",
-      );
-      router.refresh();
-    } catch (error) {
-      setMessage(
-        `${error instanceof Error ? error.message : "Verification unavailable."} Retry verification rather than sending another payment.`,
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
+
   async function pay() {
     if (!connector.current || invoice.network !== "testnet" || busy) return;
     setBusy(true);
@@ -115,14 +143,42 @@ export function PaymentCheckout({
       setBusy(false);
     }
   }
+
   if (invoice.network !== "testnet")
     return <p>Mainnet payments are unavailable.</p>;
+
+  const hasPending = pendingAttempts.length > 0;
+
   return (
     <section
       className="bg-white rounded-xl border p-6 mt-6 space-y-3"
       aria-label="Pay invoice"
     >
       <h2 className="text-xl font-bold">Pay this invoice</h2>
+
+      {/* Recovery banner: shown when pending attempts exist on page load */}
+      {hasPending && (
+        <div
+          role="alert"
+          className="p-4 rounded-lg bg-[#fff8e1] border border-[#ffe082] text-sm text-[#8c4d00]"
+          aria-label="Pending payment recovery"
+        >
+          <p className="font-semibold">Resuming pending verification…</p>
+          <p className="mt-1">
+            A previous payment submission is being re-checked. Do not send
+            another payment.
+          </p>
+          {pendingAttempts.map((a) => (
+            <p
+              key={a.transaction_hash}
+              className="font-mono text-xs mt-2 break-all"
+            >
+              Hash: {a.transaction_hash} — Sender: {a.sender_account}
+            </p>
+          ))}
+        </div>
+      )}
+
       <p>
         {invoice.amountDisplay} {invoice.asset.symbol} directly to{" "}
         <strong>{invoice.receivingAccount}</strong> on NEAR testnet.
