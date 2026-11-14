@@ -53,7 +53,7 @@ export default async function CustomerPortalPage({
         </div>
         <div className="flex items-center gap-3">
           <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-[#eef5f0] text-[#227149] border border-[#d2e4d7]">
-            TESTNET DEMO
+            {invoice.badge}
           </span>
           <a
             href={`/api/portal/${token}/pdf`}
@@ -206,7 +206,7 @@ export default async function CustomerPortalPage({
               <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1 border-b border-[#e2e8e3]">
                 <span className="text-[#637267]">Network:</span>
                 <span className="font-semibold text-[#1c2420]">
-                  NEAR Testnet
+                  NEAR {invoice.network}
                 </span>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between py-1 border-b border-[#e2e8e3]">

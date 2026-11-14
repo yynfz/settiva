@@ -79,13 +79,13 @@ export function PaymentCheckout({
       if (!connector.current) {
         const { NearConnector } = await import("@hot-labs/near-connect");
         connector.current = new NearConnector({
-          network: "testnet",
+          network: invoice.network,
           autoConnect: false,
           features: { signAndSendTransaction: true, signInWithoutAddKey: true },
         });
       }
       const wallet = await connector.current.connect();
-      const accounts = await wallet.getAccounts({ network: "testnet" });
+      const accounts = await wallet.getAccounts({ network: invoice.network });
       if (!accounts[0]) throw new Error("No testnet account was selected.");
       setConnectedAccount(accounts[0].accountId);
       setSender(accounts[0].accountId);
@@ -99,33 +99,25 @@ export function PaymentCheckout({
   }
 
   async function pay() {
-    if (!connector.current || invoice.network !== "testnet" || busy) return;
+    if (!connector.current || invoice.checkoutEnabled === false || busy) return;
     setBusy(true);
     setMessage("Review and authorize this transfer in your wallet.");
     try {
       const wallet = await connector.current.wallet();
-      const accounts = await wallet.getAccounts({ network: "testnet" });
+      const accounts = await wallet.getAccounts({ network: invoice.network });
       if (!accounts.some((account) => account.accountId === connectedAccount))
         throw new Error("Reconnect the selected payer account.");
+      const policyResponse = await fetch(`/api/portal/${token}/checkout`, {
+        method: "POST",
+      });
+      const policy = await policyResponse.json();
+      if (!policyResponse.ok)
+        throw new Error(policy.error || "Checkout disabled.");
       const outcome = await wallet.signAndSendTransaction({
-        network: "testnet",
+        network: policy.network,
         signerId: connectedAccount,
-        receiverId: invoice.asset.contract,
-        actions: [
-          {
-            type: "FunctionCall",
-            params: {
-              methodName: "ft_transfer",
-              args: {
-                receiver_id: invoice.receivingAccount,
-                amount: invoice.amountAtomic,
-                memo: invoice.paymentReference,
-              },
-              gas: "30000000000000",
-              deposit: "1",
-            },
-          },
-        ],
+        receiverId: policy.receiverId,
+        actions: policy.actions,
       });
       setSubmitted(true);
       const transactionHash = outcome?.transaction?.hash;
@@ -144,7 +136,7 @@ export function PaymentCheckout({
     }
   }
 
-  if (invoice.network !== "testnet")
+  if (invoice.checkoutEnabled === false)
     return <p>Mainnet payments are unavailable.</p>;
 
   const hasPending = pendingAttempts.length > 0;
@@ -181,7 +173,7 @@ export function PaymentCheckout({
 
       <p>
         {invoice.amountDisplay} {invoice.asset.symbol} directly to{" "}
-        <strong>{invoice.receivingAccount}</strong> on NEAR testnet.
+        <strong>{invoice.receivingAccount}</strong> on NEAR {invoice.network}.
       </p>
       <p className="text-sm">
         {invoice.asset.label}. The transfer attaches 1 yoctoNEAR; gas costs NEAR
@@ -190,7 +182,7 @@ export function PaymentCheckout({
       </p>
       {!connectedAccount ? (
         <button disabled={busy} onClick={connect} className="primary-button">
-          Connect testnet wallet
+          Connect {invoice.network} wallet
         </button>
       ) : (
         <>

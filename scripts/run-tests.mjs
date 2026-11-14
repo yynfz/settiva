@@ -11,3 +11,6 @@ const run = (files, extraEnv = {}) => {
 run(args);
 if (args.length === 0)
   run(["tests/fallback.http.test.ts"], { SETTIVA_TEST_ASSET: "test-token" });
+
+if (args.length === 0)
+  run(["tests/mainnet.http.test.ts"], { SETTIVA_MAINNET_ENABLED: "true" });

@@ -2,8 +2,13 @@ import "server-only";
 import { z } from "zod";
 import { database, RequestError } from "./merchant";
 
-async function rpc(method: string, params: unknown) {
-  const endpoint = process.env.NEAR_TESTNET_RPC_URL;
+import { validateInvoiceAsset } from "./network";
+import { explorerUrl } from "../network";
+async function networkRpc(network: string, method: string, params: unknown) {
+  const endpoint =
+    network === "mainnet"
+      ? process.env.NEAR_MAINNET_RPC_URL
+      : process.env.NEAR_TESTNET_RPC_URL;
   if (!endpoint)
     throw new RequestError(
       503,
@@ -43,12 +48,7 @@ export async function paymentInvoice(token: string) {
     .maybeSingle();
   if (error || !data)
     throw new RequestError(404, "invoice_not_found", "Invoice not found.");
-  if (data.network !== "testnet")
-    throw new RequestError(
-      403,
-      "mainnet_disabled",
-      "Mainnet payments are unavailable.",
-    );
+  validateInvoiceAsset(data);
   return data;
 }
 function receipt(
@@ -76,7 +76,7 @@ function receipt(
     blockHash: payment.block_hash,
     blockTimestamp: new Date(payment.block_timestamp).toISOString(),
     verifiedAt: payment.verified_at,
-    explorerUrl: `https://testnet.nearblocks.io/txns/${payment.transaction_hash}`,
+    explorerUrl: explorerUrl(invoice.network, payment.transaction_hash),
   };
 }
 export async function appliedReceipt(
@@ -217,11 +217,13 @@ export async function verifyPayment(
   const invoice = await paymentInvoice(token);
   const db = database();
 
+  const rpc = (method: string, params: unknown) =>
+    networkRpc(invoice.network, method, params);
   // Idempotency: return stable result for already-verified hashes.
   const { data: existing, error } = await db
     .from("verified_payments")
     .select("*")
-    .eq("network", "testnet")
+    .eq("network", invoice.network)
     .eq("transaction_hash", hash)
     .maybeSingle();
   if (error) throw error;
@@ -264,7 +266,7 @@ export async function verifyPayment(
     throw err;
   }
 
-  if (chain.chain_id !== "testnet") {
+  if (chain.chain_id !== invoice.network) {
     await upsertAttempt(
       db,
       invoice.id,
@@ -276,7 +278,7 @@ export async function verifyPayment(
     throw new RequestError(
       503,
       "wrong_network",
-      "Verification RPC is not testnet.",
+      "Verification RPC does not match the invoice network.",
     );
   }
 
@@ -471,9 +473,9 @@ function formatOverpayment(payment: any, invoice: any): Overpayment {
     refundTimestamp: payment.refund_timestamp
       ? new Date(payment.refund_timestamp).toISOString()
       : null,
-    explorerUrl: `https://testnet.nearblocks.io/txns/${payment.transaction_hash}`,
+    explorerUrl: explorerUrl(invoice.network, payment.transaction_hash),
     refundExplorerUrl: payment.refund_hash
-      ? `https://testnet.nearblocks.io/txns/${payment.refund_hash}`
+      ? explorerUrl(invoice.network, payment.refund_hash)
       : null,
   };
 }
@@ -586,12 +588,15 @@ export async function verifyRefund(
   }
 
   // Verify return transaction on NEAR RPC
+  validateInvoiceAsset(invoice);
+  const rpc = (method: string, params: unknown) =>
+    networkRpc(invoice.network, method, params);
   const chain = await rpc("status", []);
-  if (chain.chain_id !== "testnet") {
+  if (chain.chain_id !== invoice.network) {
     throw new RequestError(
       503,
       "wrong_network",
-      "Verification RPC is not testnet.",
+      "Verification RPC does not match the invoice network.",
     );
   }
 
@@ -707,7 +712,7 @@ export async function lookupTransfer(token: string, hash: string) {
           ? {
               transactionHash: p.refund_hash,
               blockTimestamp: p.refund_timestamp,
-              explorerUrl: `https://testnet.nearblocks.io/txns/${p.refund_hash}`,
+              explorerUrl: explorerUrl(invoice.network, p.refund_hash),
             }
           : null,
     };

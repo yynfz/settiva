@@ -735,6 +735,7 @@ function InvoiceManager({
                 <div className="invoice-card-main">
                   <div className="invoice-card-header">
                     <span className="invoice-num">{inv.invoice_number}</span>
+                    <span>{inv.badge}</span>
                     <span
                       className={`status-pill ${
                         inv.status === "paid"

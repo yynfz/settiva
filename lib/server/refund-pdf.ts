@@ -1,10 +1,11 @@
 import "server-only";
+import { networkPolicy } from "./network";
 import type { Overpayment } from "@/lib/contracts";
 
 export function refundPdf(overpayment: Overpayment) {
   const lines = [
     "SETTIVA - OVERPAYMENT REFUND CREDIT NOTE",
-    "TESTNET - NO MONETARY VALUE",
+    networkPolicy(overpayment.network).badge,
     `Original Invoice: ${overpayment.invoiceNumber}`,
     `Refund Status: ${overpayment.refundStatus.toUpperCase()}`,
     `Amount Refunded: ${overpayment.amountDisplay} ${overpayment.assetSymbol}`,

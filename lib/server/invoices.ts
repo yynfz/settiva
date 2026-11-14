@@ -1,4 +1,5 @@
 import "server-only";
+import { networkPolicy } from "./network";
 import crypto from "node:crypto";
 import { configuredAsset } from "@/lib/asset";
 import type {
@@ -324,6 +325,7 @@ export async function listInvoicesForMerchant(
     );
     const isOverdue = isInvoiceOverdue(inv.status, inv.due_date);
     return {
+      badge: networkPolicy(inv.network).badge,
       id: inv.id,
       merchant_id: inv.merchant_id,
       invoice_number: inv.invoice_number,
@@ -390,7 +392,9 @@ export async function getPublicInvoiceByToken(
     decimals: invoiceData.token_decimals,
     label:
       invoiceData.asset_kind === "circle-usdc"
-        ? "Circle testnet USDC — no monetary value"
+        ? invoiceData.network === "mainnet"
+          ? "Circle native USDC · Mainnet"
+          : "Circle testnet USDC — no monetary value"
         : "Test token — no monetary value",
   };
   const isOverdue = isInvoiceOverdue(invoiceData.status, invoiceData.due_date);
@@ -408,6 +412,7 @@ export async function getPublicInvoiceByToken(
 
   // Strict public projection: NEVER expose client_label or description!
   return {
+    ...networkPolicy(invoiceData.network),
     invoiceNumber: invoiceData.invoice_number,
     merchantDisplayName,
     network: invoiceData.network,
@@ -450,6 +455,7 @@ export async function getInvoiceByIdForMerchant(
   const isOverdue = isInvoiceOverdue(inv.status, inv.due_date);
 
   return {
+    badge: networkPolicy(inv.network).badge,
     ...inv,
     is_overdue: isOverdue,
     items,

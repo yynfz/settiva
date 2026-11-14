@@ -1,4 +1,5 @@
 import "server-only";
+import { networkPolicy } from "./network";
 import type { Invoice, PublicInvoice } from "@/lib/contracts";
 
 function escapePdf(str: string): string {
@@ -80,7 +81,9 @@ export function generateInvoicePdf(
   commands.push("BT /F2 16 Tf 55 742 Td (SETTIVA INVOICE) Tj ET");
 
   // Header Badge (Network)
-  commands.push("BT /F2 10 Tf 460 744 Td (TESTNET DEMO) Tj ET");
+  commands.push(
+    `BT /F2 10 Tf 460 744 Td (${networkPolicy(invoice.network).badge}) Tj ET`,
+  );
 
   // Document Info
   commands.push("0.1 0.1 0.1 rg");

@@ -1,9 +1,10 @@
 import "server-only";
+import { networkPolicy } from "./network";
 import type { PaymentReceipt } from "./payments";
 export function receiptPdf(receipt: PaymentReceipt) {
   const lines = [
     "SETTIVA - VERIFIED PAYMENT RECEIPT",
-    "TESTNET - NO MONETARY VALUE",
+    networkPolicy(receipt.network).badge,
     `Invoice: ${receipt.invoiceNumber}`,
     `Amount: ${receipt.amountDisplay} ${receipt.assetSymbol}`,
     `Atomic amount: ${receipt.amountAtomic}`,

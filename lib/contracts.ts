@@ -43,6 +43,7 @@ export type InvoiceItem = {
 };
 
 export type Invoice = {
+  badge?: string;
   id: string;
   merchant_id: string;
   invoice_number: string;
@@ -76,6 +77,8 @@ export type PublicInvoiceItem = {
 };
 
 export type PublicInvoice = {
+  checkoutEnabled?: boolean;
+  badge?: string;
   invoiceNumber: string;
   merchantDisplayName: string;
   network: "testnet" | "mainnet";

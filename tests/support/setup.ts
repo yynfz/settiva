@@ -194,6 +194,21 @@ export default async function setup(project: TestProject) {
           send(res, {});
           return;
         }
+        if (url.pathname === "/__historical") {
+          const input = await jsonBody(req);
+          const result = await client!.query(
+            `insert into public.invoices(merchant_id,invoice_number,access_token,payment_reference,network,token_contract_id,asset_symbol,token_decimals,asset_kind,receiving_account,amount_atomic,amount_display,client_label)
+            select merchant_id,'HISTORICAL',access_token || '-mainnet',payment_reference || '-mainnet','mainnet',$2,'USDC',6,$3,'merchant.near',amount_atomic,amount_display,client_label from public.invoices where id=$1 returning *`,
+            [
+              input.id,
+              input.contract ||
+                "17208628f84f5d6ad33f0da3bbbeb27ffcb398eac501a31bd6ad2011e36133a1",
+              input.kind || "circle-usdc",
+            ],
+          );
+          send(res, result.rows[0]);
+          return;
+        }
         if (url.pathname === "/__transaction") {
           transactionEvidence = await jsonBody(req);
           send(res, {});
@@ -298,7 +313,7 @@ export default async function setup(project: TestProject) {
           }
           return;
         }
-        if (url.pathname === "/rpc") {
+        if (url.pathname === "/rpc" || url.pathname === "/mainnet-rpc") {
           const call = await jsonBody(req);
           if (rpcScenario === "offline") {
             send(res, {}, 503);
@@ -310,7 +325,13 @@ export default async function setup(project: TestProject) {
               id: call.id,
               result: {
                 chain_id:
-                  rpcScenario === "wrong-network" ? "mainnet" : "testnet",
+                  url.pathname === "/mainnet-rpc"
+                    ? rpcScenario === "wrong-network"
+                      ? "testnet"
+                      : "mainnet"
+                    : rpcScenario === "wrong-network"
+                      ? "mainnet"
+                      : "testnet",
               },
             });
             return;
@@ -396,12 +417,14 @@ export default async function setup(project: TestProject) {
         NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonKey,
         SUPABASE_SECRET_KEY: serviceKey,
         NEAR_TESTNET_RPC_URL: `${externalUrl}/rpc`,
+        NEAR_MAINNET_RPC_URL: `${externalUrl}/mainnet-rpc`,
         NEAR_TESTNET_ASSET: fallback ? "test-token" : "circle-usdc",
         NEAR_TESTNET_TEST_TOKEN_CONTRACT: "demo-token.testnet",
         NEAR_TESTNET_TEST_TOKEN_NAME: "Test Dollar",
         NEAR_TESTNET_TEST_TOKEN_SYMBOL: "TUSD",
         NEAR_TESTNET_TEST_TOKEN_DECIMALS: "6",
-        ENABLE_MAINNET_PAYMENTS: "false",
+        ENABLE_MAINNET_PAYMENTS:
+          process.env.SETTIVA_MAINNET_ENABLED === "true" ? "true" : "false",
         NEXT_TELEMETRY_DISABLED: "1",
       },
     );
