@@ -1,0 +1,13 @@
+node_modules
+.next
+.git
+.github
+docs
+tests
+test-results
+coverage
+*.tsbuildinfo
+next-env.d.ts
+README.md
+AGENTS.md
+GLOSSARY.md
