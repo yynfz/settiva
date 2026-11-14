@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
             version="${RELEASE_TAG}"
-            tag="prod_${version#v}"
+            tag="prod_${version}"
             env_name="prod"
             domain="settiva.expekerja.com"
           else
