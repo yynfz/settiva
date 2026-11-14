@@ -132,7 +132,7 @@ test("verification endpoint is rate-limited after too many distinct hashes", asy
     body: JSON.stringify({ scenario: "offline" }),
   });
 
-  // Send 10 distinct hashes (the rate limit max) using valid Base58 characters.
+  // Send 10 distinct hashes (the rate limit max).
   const chars = "123456789A";
   for (const c of chars) {
     await request(`/api/portal/${invoice.access_token}/verify`, {
@@ -172,7 +172,7 @@ test("rate limit does not apply to re-submitting the same hash", async () => {
   // Submit the original hash once while offline (records attempt).
   await verify(invoice.access_token);
 
-  // Exhaust the rate limit with 10 other hashes using valid Base58 characters.
+  // Exhaust the rate limit with 10 other hashes.
   for (const c of "123456789B") {
     await request(`/api/portal/${invoice.access_token}/verify`, {
       method: "POST",

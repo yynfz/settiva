@@ -399,3 +399,228 @@ export async function verifyPayment(
 export type PaymentReceipt = NonNullable<
   Awaited<ReturnType<typeof appliedReceipt>>
 >;
+
+import type { Overpayment } from "@/lib/contracts";
+
+function formatOverpayment(payment: any, invoice: any): Overpayment {
+  return {
+    id: payment.id,
+    invoiceId: invoice.id,
+    invoiceNumber: invoice.invoice_number,
+    network: invoice.network,
+    transactionHash: payment.transaction_hash,
+    senderAccount: payment.sender_account,
+    receivingAccount: invoice.receiving_account,
+    amountAtomic: invoice.amount_atomic,
+    amountDisplay: invoice.amount_display,
+    assetSymbol: invoice.asset_symbol,
+    tokenContract: invoice.token_contract_id,
+    verifiedAt: payment.verified_at,
+    refundStatus: payment.refund_status || "refund_needed",
+    refundHash: payment.refund_hash || null,
+    refundTimestamp: payment.refund_timestamp
+      ? new Date(payment.refund_timestamp).toISOString()
+      : null,
+    explorerUrl: `https://testnet.nearblocks.io/txns/${payment.transaction_hash}`,
+    refundExplorerUrl: payment.refund_hash
+      ? `https://testnet.nearblocks.io/txns/${payment.refund_hash}`
+      : null,
+  };
+}
+
+export async function listOverpaymentsForInvoice(
+  invoiceId: string,
+  merchantId: string,
+): Promise<Overpayment[]> {
+  const db = database();
+  const { data: inv, error: invErr } = await db
+    .from("invoices")
+    .select("*")
+    .eq("id", invoiceId)
+    .eq("merchant_id", merchantId)
+    .maybeSingle();
+  if (invErr || !inv)
+    throw new RequestError(404, "invoice_not_found", "Invoice not found");
+
+  const { data: payments, error: payErr } = await db
+    .from("verified_payments")
+    .select("*")
+    .eq("invoice_id", invoiceId)
+    .eq("applied", false)
+    .order("verified_at", { ascending: false });
+  if (payErr) throw payErr;
+  return (payments || []).map((p) => formatOverpayment(p, inv));
+}
+
+export async function getOverpaymentById(
+  paymentId: string,
+  merchantId?: string,
+): Promise<Overpayment> {
+  const db = database();
+  const { data: payment, error: payErr } = await db
+    .from("verified_payments")
+    .select("*, invoices(*)")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (payErr || !payment)
+    throw new RequestError(
+      404,
+      "payment_not_found",
+      "Payment record not found",
+    );
+  if (payment.applied)
+    throw new RequestError(
+      400,
+      "not_an_overpayment",
+      "Applied payments cannot be refunded",
+    );
+  const invoice = payment.invoices;
+  if (!invoice)
+    throw new RequestError(
+      404,
+      "invoice_not_found",
+      "Associated invoice not found",
+    );
+  if (merchantId && invoice.merchant_id !== merchantId) {
+    throw new RequestError(
+      404,
+      "payment_not_found",
+      "Payment record not found",
+    );
+  }
+  return formatOverpayment(payment, invoice);
+}
+
+export async function verifyRefund(
+  paymentId: string,
+  merchantId: string,
+  refundHash: string,
+): Promise<Overpayment> {
+  const db = database();
+  const { data: payment, error: payErr } = await db
+    .from("verified_payments")
+    .select("*, invoices(*)")
+    .eq("id", paymentId)
+    .maybeSingle();
+  if (payErr || !payment)
+    throw new RequestError(
+      404,
+      "payment_not_found",
+      "Payment record not found",
+    );
+  if (payment.applied)
+    throw new RequestError(
+      400,
+      "not_an_overpayment",
+      "Applied payments cannot be refunded",
+    );
+  const invoice = payment.invoices;
+  if (!invoice || invoice.merchant_id !== merchantId) {
+    throw new RequestError(
+      404,
+      "payment_not_found",
+      "Payment record not found",
+    );
+  }
+
+  // Idempotency: if already refunded with the same hash, return existing result
+  if (payment.refund_status === "refunded") {
+    if (payment.refund_hash === refundHash) {
+      return formatOverpayment(payment, invoice);
+    }
+    throw new RequestError(
+      409,
+      "already_refunded",
+      "This overpayment was already refunded with a different transaction.",
+    );
+  }
+
+  // Verify return transaction on NEAR RPC
+  const chain = await rpc("status", []);
+  if (chain.chain_id !== "testnet") {
+    throw new RequestError(
+      503,
+      "wrong_network",
+      "Verification RPC is not testnet.",
+    );
+  }
+
+  const raw = await rpc("tx", {
+    tx_hash: refundHash,
+    sender_account_id: invoice.receiving_account,
+    wait_until: "FINAL",
+  });
+
+  const mismatch = (
+    msg = "No finalized return transfer matching this refund was verified.",
+  ) => new RequestError(422, "refund_mismatch", msg);
+
+  const parsed = evidenceSchema.safeParse(raw);
+  if (!parsed.success) throw mismatch();
+
+  const tx = parsed.data.transaction;
+  // The refund MUST be sent from the merchant's receiving account
+  if (
+    tx.hash !== refundHash ||
+    tx.signer_id !== invoice.receiving_account ||
+    tx.receiver_id !== invoice.token_contract_id
+  ) {
+    throw mismatch(
+      "Transaction does not match merchant sender or token contract.",
+    );
+  }
+
+  let args: any;
+  try {
+    args = JSON.parse(
+      Buffer.from(tx.actions[0].FunctionCall.args, "base64").toString("utf8"),
+    );
+  } catch {
+    throw mismatch();
+  }
+
+  // The refund recipient MUST be the original overpayment sender
+  if (args.receiver_id !== payment.sender_account) {
+    throw mismatch("Refund recipient does not match original payer.");
+  }
+  // The refund amount MUST be the full invoice amount
+  if (args.amount !== invoice.amount_atomic) {
+    throw mismatch("Refund amount does not match overpayment amount.");
+  }
+
+  const execution = parsed.data.receipts_outcome.find(
+    (item) =>
+      item.id ===
+      parsed.data.transaction_outcome.outcome.status.SuccessReceiptId,
+  );
+  if (
+    !execution ||
+    execution.outcome.executor_id !== invoice.token_contract_id ||
+    !("SuccessValue" in execution.outcome.status)
+  ) {
+    throw mismatch("Return transfer execution failed.");
+  }
+
+  const block = z
+    .object({
+      header: z.object({
+        hash: z.literal(execution.block_hash),
+        timestamp_nanosec: z.string().regex(/^\d+$/),
+      }),
+    })
+    .parse(await rpc("block", { block_id: execution.block_hash }));
+
+  const timestamp = new Date(
+    Number(BigInt(block.header.timestamp_nanosec) / 1000000n),
+  ).toISOString();
+
+  const saved = await db.rpc("record_verified_refund", {
+    p_payment_id: payment.id,
+    p_refund_hash: refundHash,
+    p_refund_block: execution.block_hash,
+    p_refund_timestamp: timestamp,
+  });
+  if (saved.error) throw saved.error;
+
+  return formatOverpayment(saved.data, invoice);
+}

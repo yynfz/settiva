@@ -105,3 +105,23 @@ export type CreateInvoiceInput = {
   dueDate?: string;
   items: CreateInvoiceItemInput[];
 };
+
+export type Overpayment = {
+  id: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  network: "testnet" | "mainnet";
+  transactionHash: string;
+  senderAccount: string;
+  receivingAccount: string;
+  amountAtomic: string;
+  amountDisplay: string;
+  assetSymbol: string;
+  tokenContract: string;
+  verifiedAt: string;
+  refundStatus: "refund_needed" | "refunded";
+  refundHash: string | null;
+  refundTimestamp: string | null;
+  explorerUrl: string;
+  refundExplorerUrl: string | null;
+};

@@ -10,6 +10,7 @@ import type {
   CreateInvoiceItemInput,
   Invoice,
   MerchantSetup,
+  Overpayment,
   StorageGuidance,
 } from "../lib/contracts";
 
@@ -790,11 +791,259 @@ function InvoiceManager({
                     </a>
                   </div>
                 </div>
+                <OverpaymentSection
+                  invoice={inv}
+                  token={session.access_token}
+                />
               </div>
             ))}
           </div>
         </div>
       )}
     </section>
+  );
+}
+
+function OverpaymentSection({
+  invoice,
+  token,
+}: {
+  invoice: Invoice;
+  token: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [overpayments, setOverpayments] = useState<Overpayment[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refundHash, setRefundHash] = useState<Record<string, string>>({});
+  const [submitting, setSubmitting] = useState<Record<string, boolean>>({});
+  const [message, setMessage] = useState<Record<string, string>>({});
+
+  async function loadOverpayments() {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/invoices/${invoice.id}/overpayments`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) setOverpayments(data.overpayments || []);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function toggle() {
+    if (!open) loadOverpayments();
+    setOpen(!open);
+  }
+
+  async function submitRefund(paymentId: string) {
+    const hash = refundHash[paymentId]?.trim();
+    if (!hash) return;
+    setSubmitting((prev) => ({ ...prev, [paymentId]: true }));
+    setMessage((prev) => ({
+      ...prev,
+      [paymentId]: "Verifying refund onchain…",
+    }));
+    try {
+      const res = await fetch(`/api/payments/${paymentId}/refund`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ refundHash: hash }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Refund verification failed");
+      setMessage((prev) => ({ ...prev, [paymentId]: "✓ Refund verified!" }));
+      await loadOverpayments();
+    } catch (err: any) {
+      setMessage((prev) => ({ ...prev, [paymentId]: err.message || "Failed" }));
+    } finally {
+      setSubmitting((prev) => ({ ...prev, [paymentId]: false }));
+    }
+  }
+
+  if (invoice.status !== "paid") return null;
+
+  return (
+    <div
+      style={{
+        marginTop: "12px",
+        borderTop: "1px solid #edf1ea",
+        paddingTop: "8px",
+        width: "100%",
+      }}
+    >
+      <button
+        type="button"
+        className="btn-sm"
+        onClick={toggle}
+        style={{ fontSize: "11px", padding: "3px 8px" }}
+      >
+        {open ? "Hide Overpayments ▲" : "Check Overpayments / Refunds ▼"}
+      </button>
+
+      {open && (
+        <div
+          style={{
+            marginTop: "8px",
+            padding: "10px",
+            background: "#fafbfa",
+            borderRadius: "6px",
+            fontSize: "12px",
+          }}
+        >
+          {loading && <p className="muted">Loading overpayments ledger…</p>}
+          {!loading && overpayments.length === 0 && (
+            <p className="muted" style={{ margin: 0 }}>
+              No duplicate payments or overpayments recorded for this invoice.
+            </p>
+          )}
+          {overpayments.map((op) => (
+            <div
+              key={op.id}
+              style={{
+                padding: "8px",
+                marginBottom: "8px",
+                background: "white",
+                border: "1px solid var(--line)",
+                borderRadius: "6px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span>
+                  <strong>
+                    {op.amountDisplay} {op.assetSymbol}
+                  </strong>{" "}
+                  from <code>{op.senderAccount}</code>
+                </span>
+                <span
+                  className={`status-pill ${op.refundStatus === "refunded" ? "paid" : "overdue"}`}
+                  style={{ fontSize: "10px" }}
+                >
+                  {op.refundStatus === "refunded"
+                    ? "REFUNDED"
+                    : "REFUND NEEDED"}
+                </span>
+              </div>
+              <div
+                style={{
+                  marginTop: "4px",
+                  fontSize: "11px",
+                  color: "var(--muted)",
+                }}
+              >
+                Tx:{" "}
+                <a
+                  href={op.explorerUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ textDecoration: "underline" }}
+                >
+                  {op.transactionHash.slice(0, 16)}…
+                </a>
+              </div>
+
+              {op.refundStatus === "refund_needed" ? (
+                <div
+                  style={{
+                    marginTop: "8px",
+                    padding: "8px",
+                    background: "#fff8e1",
+                    borderRadius: "4px",
+                    border: "1px solid #ffe082",
+                  }}
+                >
+                  <p
+                    style={{
+                      margin: "0 0 6px 0",
+                      fontSize: "11px",
+                      color: "#8c4d00",
+                    }}
+                  >
+                    Authorize a return of{" "}
+                    <strong>
+                      {op.amountDisplay} {op.assetSymbol}
+                    </strong>{" "}
+                    from your receiving account to{" "}
+                    <code>{op.senderAccount}</code> in your wallet, then submit
+                    the transaction hash:
+                  </p>
+                  <div style={{ display: "flex", gap: "6px" }}>
+                    <input
+                      placeholder="Return transaction hash"
+                      value={refundHash[op.id] || ""}
+                      onChange={(e) =>
+                        setRefundHash((prev) => ({
+                          ...prev,
+                          [op.id]: e.target.value,
+                        }))
+                      }
+                      style={{ flex: 1, padding: "4px 8px", fontSize: "12px" }}
+                    />
+                    <button
+                      type="button"
+                      className="btn-sm btn-primary"
+                      disabled={submitting[op.id] || !refundHash[op.id]}
+                      onClick={() => submitRefund(op.id)}
+                    >
+                      {submitting[op.id] ? "Verifying…" : "Verify Refund"}
+                    </button>
+                  </div>
+                  {message[op.id] && (
+                    <p
+                      style={{
+                        margin: "4px 0 0 0",
+                        fontSize: "11px",
+                        color: "#8c4d00",
+                      }}
+                    >
+                      {message[op.id]}
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    marginTop: "6px",
+                    display: "flex",
+                    gap: "8px",
+                    alignItems: "center",
+                  }}
+                >
+                  <a
+                    href={`/api/payments/${op.id}/refund/pdf`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn-sm"
+                    style={{ fontSize: "11px" }}
+                  >
+                    📄 Download Credit Note PDF
+                  </a>
+                  {op.refundExplorerUrl && (
+                    <a
+                      href={op.refundExplorerUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="btn-sm"
+                      style={{ fontSize: "11px" }}
+                    >
+                      View Refund Tx ↗
+                    </a>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
