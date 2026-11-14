@@ -4,7 +4,7 @@
 # The VPS only pulls; it never builds.
 services:
   settiva:
-    image: expekerja/settiva:prod_v0.0.1
+    image: "expekerja/settiva:${PROD_TAG:-prod_v0.0.1}"
     container_name: settiva
     restart: unless-stopped
 
@@ -48,7 +48,7 @@ services:
       traefik.http.services.settiva.loadbalancer.server.port: "3000"
 
   settiva-dev:
-    image: expekerja/settiva:dev_v0.0.1
+    image: "expekerja/settiva:${DEV_TAG:-dev_v0.0.1}"
     container_name: settiva-dev
     restart: unless-stopped
 

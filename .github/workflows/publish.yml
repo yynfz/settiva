@@ -102,10 +102,11 @@ jobs:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
           DEPLOY_USER: ${{ vars.DEPLOY_USER }}
           TARGET: ${{ needs.image.outputs.env }}
+          TAG: ${{ needs.image.outputs.tag }}
         run: |
           set -euo pipefail
           ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
-            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" "deploy-$TARGET"
+            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" "deploy-$TARGET $TAG"
 
       - name: Verify the public site
         env:

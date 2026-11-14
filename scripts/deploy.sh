@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pull a published image and (re)start one environment on this VPS.
-# Usage: ./scripts/deploy.sh dev|prod
+# Usage: ./scripts/deploy.sh dev|prod [image-tag]
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -12,13 +12,15 @@ case "${1:-}" in
     SERVICE=settiva-dev
     DOMAIN=settiva-dev.expekerja.com
     PORT=8097
-    IMAGE=expekerja/settiva:dev_v0.0.1
+    IMAGE=expekerja/settiva:${2:-dev_v0.0.1}
+    export DEV_TAG="${IMAGE#expekerja/settiva:}"
     ;;
   prod)
     SERVICE=settiva
     DOMAIN=settiva.expekerja.com
     PORT=8096
-    IMAGE=expekerja/settiva:prod_v0.0.1
+    IMAGE=expekerja/settiva:${2:-prod_v0.0.1}
+    export PROD_TAG="${IMAGE#expekerja/settiva:}"
     ;;
   *)
     echo "Usage: $0 dev|prod" >&2
