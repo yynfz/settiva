@@ -1,0 +1,131 @@
+name: Publish
+
+# Builds an arm64 image and publishes it, then deploys the matching environment
+# on the VPS by pulling that image:
+#   push to main   -> expekerja/settiva:dev_v0.0.1   -> settiva-dev.expekerja.com
+#   published release -> expekerja/settiva:prod_vX.Y.Z -> settiva.expekerja.com
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**.md'
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-settiva
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      env: ${{ steps.meta.outputs.env }}
+      domain: ${{ steps.meta.outputs.domain }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decide image tag and target environment
+        id: meta
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "release" ]; then
+            version="${RELEASE_TAG}"
+            tag="prod_${version#v}"
+            env_name="prod"
+            domain="settiva.expekerja.com"
+          else
+            tag="dev_v0.0.1"
+            env_name="dev"
+            domain="settiva-dev.expekerja.com"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "env=$env_name" >> "$GITHUB_OUTPUT"
+          echo "domain=$domain" >> "$GITHUB_OUTPUT"
+          echo "Publishing expekerja/settiva:$tag for $env_name ($domain)"
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # The VPS is Oracle Ampere, so the image must be arm64.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          push: true
+          tags: expekerja/settiva:${{ steps.meta.outputs.tag }}
+          build-args: |
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+            NEXT_PUBLIC_NEAR_DEFAULT_NETWORK=testnet
+            NEXT_PUBLIC_APP_URL=${{ steps.meta.outputs.env == 'prod' && 'https://settiva.expekerja.com' || 'https://settiva-dev.expekerja.com' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Set up SSH
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ vars.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$DEPLOY_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      # The remote key is locked to scripts/remote-deploy.sh, which only accepts
+      # 'deploy-dev' or 'deploy-prod'.
+      - name: Pull the image and restart on the VPS
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          TARGET: ${{ needs.image.outputs.env }}
+        run: |
+          set -euo pipefail
+          ssh -i ~/.ssh/deploy_key -o IdentitiesOnly=yes -o BatchMode=yes \
+            -o ConnectTimeout=15 "$DEPLOY_USER@$DEPLOY_HOST" "deploy-$TARGET"
+
+      - name: Verify the public site
+        env:
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DOMAIN: ${{ needs.image.outputs.domain }}
+        run: |
+          set -uo pipefail
+          resolved="$( { getent ahostsv4 "$DOMAIN" 2>/dev/null || true; } | awk 'NR==1{print $1}')"
+          if [ -z "$resolved" ]; then
+            echo "::notice::$DOMAIN does not resolve yet — skipping public verification"
+            exit 0
+          fi
+          if [ "$resolved" != "$DEPLOY_HOST" ]; then
+            echo "::notice::$DOMAIN resolves to $resolved (not $DEPLOY_HOST) — skipping public verification"
+            exit 0
+          fi
+          for i in {1..15}; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://$DOMAIN/" || true)
+            [ "$code" = "200" ] && { echo "https://$DOMAIN -> 200"; exit 0; }
+            sleep 3
+          done
+          echo "::error::https://$DOMAIN did not return 200 after deploy (last: $code)"
+          exit 1

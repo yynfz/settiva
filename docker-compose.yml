@@ -1,18 +1,18 @@
+# Images are built and pushed to Docker Hub by .github/workflows/publish.yml:
+#   push to main   -> expekerja/settiva:dev_v0.0.1  -> settiva-dev.expekerja.com
+#   GitHub release -> expekerja/settiva:prod_vX.Y.Z -> settiva.expekerja.com
+# The VPS only pulls; it never builds.
 services:
   settiva:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: settiva:latest
+    image: expekerja/settiva:prod_v0.0.1
     container_name: settiva
     restart: unless-stopped
 
-    # Next inlines NEXT_PUBLIC_* at build time; these files also supply runtime
-    # server-side values (Supabase secret key, NEAR RPC). Keep them chmod 600.
+    # Server-side runtime configuration. .env.prod overrides .env when present.
     env_file:
       - path: .env
         required: false
-      - path: .env.local
+      - path: .env.prod
         required: false
 
     # Localhost-only binding for smoke checks; public traffic goes through traefik.
@@ -46,6 +46,49 @@ services:
       traefik.http.routers.settiva.tls.certresolver: letsencrypt
 
       traefik.http.services.settiva.loadbalancer.server.port: "3000"
+
+  settiva-dev:
+    image: expekerja/settiva:dev_v0.0.1
+    container_name: settiva-dev
+    restart: unless-stopped
+
+    # .env.dev overrides .env for the dev deployment when present.
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.dev
+        required: false
+
+    ports:
+      - "127.0.0.1:8097:3000"
+
+    networks:
+      - traefik
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: yayan-cv_default
+
+      traefik.http.middlewares.settiva-dev-redirect.redirectscheme.scheme: https
+      traefik.http.middlewares.settiva-dev-redirect.redirectscheme.permanent: "true"
+
+      traefik.http.routers.settiva-dev-http.rule: Host(`settiva-dev.expekerja.com`)
+      traefik.http.routers.settiva-dev-http.entrypoints: web
+      traefik.http.routers.settiva-dev-http.middlewares: settiva-dev-redirect
+
+      traefik.http.routers.settiva-dev.rule: Host(`settiva-dev.expekerja.com`)
+      traefik.http.routers.settiva-dev.entrypoints: websecure
+      traefik.http.routers.settiva-dev.tls: "true"
+      traefik.http.routers.settiva-dev.tls.certresolver: letsencrypt
+
+      traefik.http.services.settiva-dev.loadbalancer.server.port: "3000"
 
 networks:
   traefik:
