@@ -1,0 +1,53 @@
+services:
+  settiva:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: settiva:latest
+    container_name: settiva
+    restart: unless-stopped
+
+    # Next inlines NEXT_PUBLIC_* at build time; these files also supply runtime
+    # server-side values (Supabase secret key, NEAR RPC). Keep them chmod 600.
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.local
+        required: false
+
+    # Localhost-only binding for smoke checks; public traffic goes through traefik.
+    ports:
+      - "127.0.0.1:8096:3000"
+
+    networks:
+      - traefik
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: yayan-cv_default
+
+      traefik.http.middlewares.settiva-redirect.redirectscheme.scheme: https
+      traefik.http.middlewares.settiva-redirect.redirectscheme.permanent: "true"
+
+      traefik.http.routers.settiva-http.rule: Host(`settiva.expekerja.com`)
+      traefik.http.routers.settiva-http.entrypoints: web
+      traefik.http.routers.settiva-http.middlewares: settiva-redirect
+
+      traefik.http.routers.settiva.rule: Host(`settiva.expekerja.com`)
+      traefik.http.routers.settiva.entrypoints: websecure
+      traefik.http.routers.settiva.tls: "true"
+      traefik.http.routers.settiva.tls.certresolver: letsencrypt
+
+      traefik.http.services.settiva.loadbalancer.server.port: "3000"
+
+networks:
+  traefik:
+    external: true
+    name: yayan-cv_default
