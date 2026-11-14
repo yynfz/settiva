@@ -54,7 +54,7 @@ jobs:
           DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
         run: |
           set -uo pipefail
-          resolved="$(getent ahostsv4 settiva.expekerja.com | awk 'NR==1{print $1}')"
+          resolved="$( { getent ahostsv4 settiva.expekerja.com 2>/dev/null || true; } | awk 'NR==1{print $1}')"
           if [ -z "$resolved" ]; then
             echo "::notice::settiva.expekerja.com does not resolve yet — skipping public verification"
             exit 0
