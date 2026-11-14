@@ -1,78 +1,73 @@
 # Settiva
 
-Invoice globally. Settle with USDC.
+Itemized invoices, direct NEAR payments, and independently verified payment and refund evidence.
 
-This first application slice implements invited-merchant sign-in and NEAR testnet receiving-account setup (GitHub issue #2). Invoice issuance, payment checkout, settlement receipts, and refunds are separate tickets and are not implemented yet.
+Settiva lets an invited merchant configure a receiving account, issue an invoice, export a PDF, and share a Customer Portal link. The payer approves a direct token transfer in their wallet. Settiva verifies finalized onchain execution before issuing a receipt. Distinct duplicate payments are retained as overpayments; the merchant approves a separate full return transfer, which Settiva verifies. Payers can look up one known transfer without seeing the complete payment history.
 
-## Run locally
+## Start here
 
-Use Node 22.18+ and npm. Install with `npm ci`, copy the environment example to a local environment file, and supply your Supabase project URL, publishable key, and server secret. Never commit the local file or put the server secret in a public environment variable.
+- [Demo walkthrough](docs/DEMO.md): the complete merchant → payer → refund journey.
+- [Merchant invitation guide](docs/MERCHANT_INVITATIONS.md): hosted setup and the invitation-trigger repair.
+- [Genuine testnet evidence](docs/TESTNET_EVIDENCE.md): actual evidence status; fixture tests are separate.
+- [Domain vocabulary](GLOSSARY.md) and [decisions](docs/adr/).
 
-Apply the SQL migration in `supabase/migrations` to your development Supabase project through its SQL editor or your normal migration tooling. It creates merchant access/profile tables, read-only user RLS policies, and an Auth signup guard. Review it before applying it to a shared project: this app intentionally rejects public signups. Existing users are not automatically granted merchant access.
+## Fresh checkout: automated evaluation
 
-In Supabase Auth settings, also disable **Allow new users to sign up**. The database guard provides defense in depth even if that switch is accidentally enabled. Keep email/password sign-in enabled. The application has no public registration flow.
+Use Node 22.18+ and npm on macOS or Linux as an ordinary non-root user. The tests need loopback networking; they never require hosted Supabase credentials or real wallets.
 
-Provision a merchant with `npm run merchant:invite -- merchant@example.com`. This operator-only command confirms the target email, reads a hidden temporary password, and uses the admin API to create a confirmed, explicitly invited account. The database trigger grants merchant access. It sends no email; deliver credentials through your existing private channel. For existing Auth users, an operator may grant access by inserting their verified user ID into `merchant_access` through privileged SQL. Do not give clients write access to this table.
+```bash
+git clone https://github.com/yynfz/settiva.git
+cd settiva
+npm ci
+npm run test:setup
+npx playwright install chromium
+# Linux CI machines may need: npx playwright install --with-deps chromium
+npm run typecheck
+npm test
+npm run test:browser
+npm run format:check
+npm run build
+```
 
-Run `npm run dev`, open the local URL, sign in, and enter a display name and receiving account. Confirm control of that exact account, then choose **Check and save account**. The server verifies the RPC chain, account existence, allowlisted token metadata, token balance response, and token-storage registration before saving. A zero token balance does not prevent an already registered account from receiving funds.
+`test:setup` downloads a pinned official PostgREST binary and verifies its published SHA-256 digest. The harness creates disposable native PostgreSQL, applies every migration, and runs real PostgREST/RLS. It builds and starts the production Next.js app for each configuration. Supabase Auth responses, NEAR RPC, and wallet approval are controlled external fixtures. `npm test` includes all HTTP and browser cases, the fallback-token configuration, and a separately simulated enabled mainnet policy. `test:browser` runs every browser journey, including one complete invoice-to-refund flow. These are application tests, not evidence that real blockchain funds moved.
 
-Profiles are writable only by the server after validation. Authenticated clients can read only their own profile and invitation. Changing a receiving account requires fresh confirmation and checks. A successful setup check is a point-in-time observation, not proof of wallet ownership or a guarantee of future storage registration; invoice issuance must check again.
+On macOS, an existing Google Chrome installation is used when available. Otherwise install Chromium, or point `PLAYWRIGHT_CHROMIUM_EXECUTABLE` at a Chromium executable. Test logs, screenshots, PDFs, downloaded binaries, and generated Next.js types stay ignored. Run individual tests with `npm test -- tests/lookup.http.test.ts` during development. Avoid concurrent test runs in the same checkout because the production builds share the same `.next` output.
 
-## Token configuration and live checks
+## Run against your Supabase project
 
-Circle testnet USDC is the default allowlisted asset. Run `npm run near:check` to read token metadata and storage bounds, or `npm run near:check -- your-account.testnet` to include that account's token storage and balance. This command does not fund accounts, sign, or broadcast.
+```bash
+cp .env.example .env.local
+# Fill in the Supabase project URL, publishable key, and server secret locally.
+npm run merchant:invite -- merchant@example.com
+npm run dev
+```
 
-The read-only investigation is recorded in `docs/TESTNET_PREFLIGHT.md`. Circle's public faucet lists NEAR Testnet, but receipt of faucet tokens must be verified for the actual supplied accounts. Time-box funding investigation to one hour. If no usable funded path is established, an operator can explicitly choose `NEAR_TESTNET_ASSET=test-token` and provide the fallback contract, expected name, symbol, and decimals in the environment settings. All four are required. The app checks them against live metadata and labels the asset **Test token — no monetary value**. It does not invent or deploy a fallback contract, and never accepts one from the client.
+Before inviting a merchant, apply **all SQL files in `supabase/migrations` in filename order** to your development Supabase project using its SQL Editor or your migration tooling. Migrations are versioned changes; do not rerun the whole set over an already migrated database. In Auth settings, disable **Allow new users to sign up**, and keep email/password sign-in enabled. The database also enforces invitations at transaction completion. Existing Auth users are not granted access automatically. See the [invitation guide](docs/MERCHANT_INVITATIONS.md) for provisioning and repair.
 
-An unregistered receiving account gets contract-specific `storage_deposit` guidance, including arguments and the minimum yoctoNEAR deposit. The merchant reviews and signs that separate transaction in their own wallet. Settiva does not execute it. No account funding or transaction signing has been performed by this implementation.
+The application works at `http://localhost:3000`; `/demo` contains the public walkthrough. Keep your server secret in `SUPABASE_SECRET_KEY`, never in `NEXT_PUBLIC_*`. The browser receives only the public project URL and publishable key. Merchant documents are downloaded with an Authorization header; session credentials are not accepted in URL query parameters.
 
-Mainnet setup is unavailable in this slice, even if someone changes the mainnet environment flag. The later mainnet-controls ticket will add the full gated behavior. Never enable live payments or claim mainnet settlement from a testnet demonstration.
+## Network and asset configuration
 
-## Tests and checks
+Circle testnet USDC is the default. `npm run near:check -- your-account.testnet` reads the current chain, token metadata, storage bounds, account, and token balance. It signs and broadcasts nothing. A registered account with zero token balance can still receive funds. Format/storage checks are point-in-time observations, not cryptographic ownership proof. See [preflight findings](docs/TESTNET_PREFLIGHT.md).
 
-- `npm run test:setup` downloads a pinned official PostgREST release into the ignored test cache and checks its published SHA-256 digest.
-- `npm test` runs the HTTP/RLS and browser cases, then the separate explicit-fallback configuration.
-- `npm test -- tests/merchant.http.test.ts` runs just the HTTP/RLS file during development.
-- `npm run test:browser` runs the merchant browser smoke.
-- `npm run test:fallback` tests the custom test-token configuration.
-- `npm run typecheck`, `npm run format:check`, and `npm run build` validate types, formatting, and the production build.
+Time-box investigation of Circle testnet funding to one hour. If a usable path is unavailable, explicitly select `NEAR_TESTNET_ASSET=test-token` and configure its contract, name, symbol, and decimals. The server checks exact metadata and labels it **Test token — no monetary value**. Fixture address `demo-token.testnet` is not a claim of a deployed or funded token. Never invent live evidence from test fixtures.
 
-The harness runs disposable native PostgreSQL and real PostgREST on loopback with unique ports, applies the real migration, and exercises actual database grants and RLS. No Docker or hosted credentials are needed. Supabase Auth responses and NEAR RPC are controlled external fixtures; the suite is not an end-to-end test of hosted Supabase Auth or real blockchain settlement. Tests assert through the application HTTP interface and the exposed PostgREST interface, not internal implementation functions. The signup test inserts through the fixture Auth service to exercise the real database signup guard. A real invited account must still be smoke-tested after applying the migration to a hosted project.
+Token storage registration requires a separate wallet-approved `storage_deposit` and NEAR deposit; gas also costs NEAR. The payer's token transfer attaches 1 yoctoNEAR. Settiva never holds keys or funds and never signs automatically.
 
-Browser smoke uses installed Google Chrome on macOS if present. Otherwise install Chromium with `npx playwright install chromium`, or set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an existing Chromium executable. CI uses Playwright's Chromium. Browser evidence and process logs remain in the ignored test cache. The native database harness supports macOS/Linux and requires an ordinary non-root user. Test servers may require sandbox permission to bind loopback sockets.
+`ENABLE_MAINNET_PAYMENTS=false` is the default. Any live activation requires explicit human authorization before changing this server-only flag. New mainnet invoices remain blocked in this release. Previously issued mainnet invoices, PDFs, lookup, and genuine settlement verification remain available while checkout is disabled. Mainnet accepts only the allowlisted Circle native USDC contract with six decimals; fallback test tokens and bridged USDC.e are rejected. UI and PDFs show `TESTNET DEMO`, `MAINNET LIMITED DEMO`, or `DISABLED` from server policy.
 
-## Reference documentation
+## Deployment
 
-- [Supabase password sign-in](https://supabase.com/docs/reference/javascript/auth-signinwithpassword)
-- [Supabase Auth configuration](https://supabase.com/docs/guides/auth/general-configuration)
-- [Supabase row-level security](https://supabase.com/docs/guides/database/postgres/row-level-security)
-- [Circle USDC contract addresses](https://developers.circle.com/stablecoins/usdc-contract-addresses)
-- [Circle testnet faucet](https://faucet.circle.com/)
-- [NEAR token and storage standards](https://docs.near.org/primitives/ft/standard)
-- [NEAR read-only RPC queries](https://docs.near.org/api/rpc/contracts)
+`npm run build` and `npm start` run production Next.js. Supply server environment values at runtime and the public values when building. The included Dockerfile and Compose configuration support the repository's existing Traefik/Docker Hub deployment; their domains, network names, and image names must be adapted for another host. Build contexts exclude `.env*` files and test caches. Applying hosted migrations and provisioning accounts are separate operator steps; the application does not migrate the hosted database automatically.
 
-The project is non-custodial software under development. This testnet setup does not establish production readiness or authorization for commercial payment services. The PRD records the project's commercial and jurisdiction-review limits.
+The existing publish workflow deploys on its configured triggers. Pushing or publishing a release may therefore deploy; obtain the operator's approval first. This task does not authorize deployment, mainnet activation, hackathon submission, or posting publicly.
 
-## Testnet payment checkout (#4)
+## Review boundaries and attribution
 
-Apply migration `202611140003_payments.sql` after the invoice migration. The customer portal uses NEAR Connect for explicit wallet approval of one `ft_transfer` with the invoice's frozen contract, recipient, amount, memo, and 1 yoctoNEAR deposit. Wallet connection does not authorize payment. Gas and any separate token-storage deposit require NEAR.
+This is a testnet hackathon demonstration under development, not a production-readiness certification. Genuine payment/duplicate/refund evidence is pending until the [evidence report](docs/TESTNET_EVIDENCE.md) contains verified real hashes. No automated test output should be presented as that evidence. Known operational limits include shared invoice-level lookup throttling, manual merchant refund authorization, and a required hosted Auth smoke after migrations.
 
-Verification accepts the portal identifier, transaction hash, and claimed sender only. It checks the testnet RPC chain, `FINAL` execution, transaction action and successful contract receipt, then records payment under an invoice lock. Repeated transaction submissions return existing evidence. Additional distinct matching transfers are retained as overpayments without replacing the original receipt; refund workflow remains a later ticket. If wallet approval or verification is uncertain, inspect wallet activity and use **Verify payment** instead of sending again.
+Built with Next.js, React, Tailwind CSS, Supabase, NEAR Connect, Zod, PostgreSQL/PostgREST, Vitest, and Playwright. Itemization, company settings, customer portal reading state, and PDF document flows are inspired by InvoiceShelf. The implementation is local TypeScript/SQL; it does not embed the InvoiceShelf application. AI coding assistance was used. Git history identifies the implementation window and subsequent changes; the original repository baseline is commit `23605c4`.
 
-Verified receipts appear in the portal and can be downloaded from `/api/portal/[token]/receipt/pdf`. Merchants use the authenticated `/api/invoices/[id]/receipt/pdf` endpoint. Receipt evidence and the paid state survive later verification failures. The payment tests use real isolated PostgreSQL/RLS with controlled RPC and a test wallet injected through NEAR Connect's external interface; they do not prove a live funded transfer. No hosted migration, funding, signing, or deployment was performed for this implementation.
+License selection is pending the project owner's choice; see `LICENSE` for the current rights status. Dependency licenses remain their respective owners'.
 
-Current integration references: [NEAR Connect wallet guidance](https://docs.near.org/web3-apps/tutorials/wallet-login), [NEAR transaction finality and RPC](https://docs.near.org/api/rpc/transactions). Wallet Selector is deprecated in the current NEAR guidance; this implementation uses `@hot-labs/near-connect`.
-
-## Transfer lookup and invitation repair (#8)
-
-Payers can open `/portal/[token]/lookup` and enter a known payment hash to view only that transfer's attempt or verified-payment evidence, classification, and verified refund status. The download contains that transfer's receipt. Lookup is read-only and grants no refund rights. Queries and downloads share a persistent limit of 30 requests per invoice per minute.
-
-For `Database error creating new user` from `merchant:invite`, apply `supabase/migrations/202611140006_fix_merchant_invitations.sql` in the hosted project's SQL Editor, then retry the invite command. Supabase admin creation inserts the Auth row before assigning application metadata inside the same transaction. The original immediate trigger rejected that intermediate row. The repair checks the final row at transaction completion and grants access only for explicit trusted invitation metadata or an Auth invitation. It does not accept email confirmation as an invitation. The regression reproduces this insert/update sequence against real isolated PostgreSQL; a hosted retry is still required after applying the migration.
-
-Apply `202611150001_public_lookup.sql` to enable lookup throttling. These migrations were tested locally; they are not automatically applied to hosted Supabase.
-
-## Mainnet collection controls (#9)
-
-Mainnet activation requires explicit human authorization before setting the server-only `ENABLE_MAINNET_PAYMENTS=true`. This implementation does not authorize activation. Keep it false in deployed environments unless that authorization has been given. New mainnet invoice issuance remains blocked in this release even when checkout is enabled for existing invoices.
-
-Apply `202611150002_mainnet_evidence.sql` to preserve verification of previously issued mainnet invoices. Checkout requests are checked by the server immediately before wallet approval and return only stored invoice terms. Disabling collection leaves historical invoice views, PDF documents, transfer lookup, and genuine transfer verification available. Mainnet verification uses `NEAR_MAINNET_RPC_URL`, requires the chain to report mainnet, and accepts only the allowlisted native USDC contract with six decimals; test-token fallback is forbidden. Portal and invoice views and PDFs show TESTNET DEMO, MAINNET LIMITED DEMO, or DISABLED from server policy. Tests simulate enabled and disabled states using local RPC fixtures; no real mainnet transactions were sent.
+References: [Supabase Auth](https://supabase.com/docs/reference/javascript/auth-admin-createuser), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [NEAR Connect](https://docs.near.org/web3-apps/tutorials/wallet-login), [NEAR transaction finality](https://docs.near.org/api/rpc/transactions), [token/storage standards](https://docs.near.org/primitives/ft/standard), [Circle contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses), [Circle faucet](https://faucet.circle.com/).

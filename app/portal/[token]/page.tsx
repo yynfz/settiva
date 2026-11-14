@@ -285,6 +285,14 @@ export default async function CustomerPortalPage({
         <a className="block mt-6 underline" href={`/portal/${token}/lookup`}>
           Look up a transfer
         </a>
+        {receipt && (
+          <PaymentCheckout
+            key="verify-existing"
+            token={token}
+            invoice={invoice}
+            verificationOnly
+          />
+        )}
         {/* Footer */}
         <footer className="text-center text-xs text-[#8c9c90] mt-8">
           Settiva • Powered by InvoiceShelf architecture & NEAR Protocol

@@ -337,7 +337,18 @@ export default async function setup(project: TestProject) {
             return;
           }
           if (call.method === "tx") {
-            send(res, { result: transactionEvidence });
+            send(res, {
+              result:
+                transactionEvidence &&
+                typeof transactionEvidence === "object" &&
+                "transactions" in transactionEvidence
+                  ? (
+                      transactionEvidence as {
+                        transactions: Record<string, unknown>;
+                      }
+                    ).transactions[call.params.tx_hash]
+                  : transactionEvidence,
+            });
             return;
           }
           if (call.method === "block") {
@@ -400,33 +411,42 @@ export default async function setup(project: TestProject) {
     server.listen(externalPort, "127.0.0.1");
     await once(server, "listening");
     const externalUrl = `http://127.0.0.1:${externalPort}`;
+    const appEnv = {
+      ...process.env,
+      NEXT_PUBLIC_SUPABASE_URL: externalUrl,
+      NEXT_PUBLIC_APP_URL: `http://127.0.0.1:${appPort}`,
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonKey,
+      SUPABASE_SECRET_KEY: serviceKey,
+      NEAR_TESTNET_RPC_URL: `${externalUrl}/rpc`,
+      NEAR_MAINNET_RPC_URL: `${externalUrl}/mainnet-rpc`,
+      NEAR_TESTNET_ASSET: fallback ? "test-token" : "circle-usdc",
+      NEAR_TESTNET_TEST_TOKEN_CONTRACT: "demo-token.testnet",
+      NEAR_TESTNET_TEST_TOKEN_NAME: "Test Dollar",
+      NEAR_TESTNET_TEST_TOKEN_SYMBOL: "TUSD",
+      NEAR_TESTNET_TEST_TOKEN_DECIMALS: "6",
+      ENABLE_MAINNET_PAYMENTS:
+        process.env.SETTIVA_MAINNET_ENABLED === "true" ? "true" : "false",
+      NEXT_TELEMETRY_DISABLED: "1",
+    };
+    appEnv.NODE_ENV = "production";
+    const build = launch(
+      process.execPath,
+      ["node_modules/next/dist/bin/next", "build", "--webpack"],
+      appEnv,
+    );
+    const [buildExit] = await once(build, "exit");
+    if (buildExit !== 0) throw new Error("Production test build failed.");
     const app = launch(
       process.execPath,
       [
         "node_modules/next/dist/bin/next",
-        "dev",
-        "--webpack",
+        "start",
         "--hostname",
         "127.0.0.1",
         "--port",
         String(appPort),
       ],
-      {
-        ...process.env,
-        NEXT_PUBLIC_SUPABASE_URL: externalUrl,
-        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: anonKey,
-        SUPABASE_SECRET_KEY: serviceKey,
-        NEAR_TESTNET_RPC_URL: `${externalUrl}/rpc`,
-        NEAR_MAINNET_RPC_URL: `${externalUrl}/mainnet-rpc`,
-        NEAR_TESTNET_ASSET: fallback ? "test-token" : "circle-usdc",
-        NEAR_TESTNET_TEST_TOKEN_CONTRACT: "demo-token.testnet",
-        NEAR_TESTNET_TEST_TOKEN_NAME: "Test Dollar",
-        NEAR_TESTNET_TEST_TOKEN_SYMBOL: "TUSD",
-        NEAR_TESTNET_TEST_TOKEN_DECIMALS: "6",
-        ENABLE_MAINNET_PAYMENTS:
-          process.env.SETTIVA_MAINNET_ENABLED === "true" ? "true" : "false",
-        NEXT_TELEMETRY_DISABLED: "1",
-      },
+      appEnv,
     );
     await waitFor(`http://127.0.0.1:${appPort}`, app);
     project.provide("environment", {

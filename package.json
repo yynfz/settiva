@@ -10,11 +10,12 @@
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node scripts/run-tests.mjs",
     "test:setup": "node scripts/setup-tests.mjs",
-    "test:browser": "vitest run tests/merchant.browser.test.ts",
+    "test:browser": "vitest run tests/*.browser.test.ts",
     "near:check": "node --env-file-if-exists=.env.local scripts/check-testnet.mjs",
     "test:fallback": "SETTIVA_TEST_ASSET=test-token vitest run tests/fallback.http.test.ts",
     "format:check": "prettier --check app lib tests scripts package.json tsconfig.json vitest.config.ts postcss.config.mjs .github/workflows/ci.yml",
-    "merchant:invite": "node --env-file-if-exists=.env.local scripts/invite-merchant.mjs"
+    "merchant:invite": "node --env-file-if-exists=.env.local scripts/invite-merchant.mjs",
+    "demo:evidence": "node --env-file-if-exists=.env.local scripts/record-demo-evidence.mjs"
   },
   "engines": {
     "node": ">=22.18.0"

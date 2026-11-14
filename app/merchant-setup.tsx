@@ -14,6 +14,60 @@ import type {
   StorageGuidance,
 } from "../lib/contracts";
 
+async function downloadDocument(path: string, token: string, filename: string) {
+  const response = await fetch(path, {
+    headers: { authorization: `Bearer ${token}` },
+  });
+  if (!response.ok)
+    throw new Error("Document download failed. Please try again.");
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function DocumentDownload({
+  path,
+  token,
+  filename,
+  children,
+}: {
+  path: string;
+  token: string;
+  filename: string;
+  children: React.ReactNode;
+}) {
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="btn-sm"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError("");
+          try {
+            await downloadDocument(path, token, filename);
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Download failed.");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {children}
+      </button>
+      {error && <span role="alert">{error}</span>}
+    </>
+  );
+}
+
 export function MerchantApp({
   url,
   publishableKey,
@@ -87,6 +141,48 @@ export function MerchantApp({
           <SignIn auth={auth} />
         )}
       </main>
+      {!session && !loading && (
+        <section className="landing-details">
+          <div>
+            <span className="eyebrow">ONE INVOICE. CLEAR EVIDENCE.</span>
+            <h2>From invoice to verified receipt</h2>
+            <p>
+              Create itemized invoices, share a private Customer Portal link,
+              and receive payments directly on NEAR. Keep the documents and
+              onchain evidence together.
+            </p>
+            <a className="demo-link" href="/demo">
+              Demo walkthrough
+            </a>
+          </div>
+          <ol>
+            <li>
+              <strong>Issue & share</strong>
+              <p>
+                Fixed payment terms, an invoice PDF, and a link for your payer.
+              </p>
+            </li>
+            <li>
+              <strong>Approve & verify</strong>
+              <p>
+                The payer approves in their wallet. Final onchain evidence
+                confirms payment.
+              </p>
+            </li>
+            <li>
+              <strong>Resolve & record</strong>
+              <p>
+                Duplicate payments are retained. Merchant-approved returns get
+                verified refund proof.
+              </p>
+            </li>
+          </ol>
+          <p className="muted">
+            Testnet demonstration · Assets have no monetary value · Invited
+            merchants only
+          </p>
+        </section>
+      )}
       <footer>
         Built for direct payments on NEAR{" "}
         <span>Testnet only · Mainnet unavailable</span>
@@ -740,14 +836,15 @@ function InvoiceManager({
                   <div className="invoice-card-header">
                     <span className="invoice-num">{inv.invoice_number}</span>
                     <span
-                      className={`status-pill ${inv.status === "paid"
-                        ? "paid"
-                        : inv.is_overdue
-                          ? "overdue"
-                          : inv.status === "viewed"
-                            ? "viewed"
-                            : "unpaid"
-                        }`}
+                      className={`status-pill ${
+                        inv.status === "paid"
+                          ? "paid"
+                          : inv.is_overdue
+                            ? "overdue"
+                            : inv.status === "viewed"
+                              ? "viewed"
+                              : "unpaid"
+                      }`}
                     >
                       {inv.is_overdue && inv.status !== "paid"
                         ? "OVERDUE"
@@ -774,15 +871,13 @@ function InvoiceManager({
                     >
                       {copiedId === inv.id ? "✓ Copied!" : "Copy Link"}
                     </button>
-                    <a
-                      href={`/api/invoices/${inv.id}/pdf${session?.access_token ? `?token=${encodeURIComponent(session.access_token)}` : ""}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="btn-sm"
-                      title="Download PDF"
+                    <DocumentDownload
+                      path={`/api/invoices/${inv.id}/pdf`}
+                      token={session.access_token}
+                      filename={`${inv.invoice_number}.pdf`}
                     >
                       PDF
-                    </a>
+                    </DocumentDownload>
                     <a
                       href={
                         typeof window !== "undefined"
@@ -1025,15 +1120,13 @@ function OverpaymentSection({
                     alignItems: "center",
                   }}
                 >
-                  <a
-                    href={`/api/payments/${op.id}/refund/pdf${token ? `?token=${encodeURIComponent(token)}` : ""}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn-sm"
-                    style={{ fontSize: "11px" }}
+                  <DocumentDownload
+                    path={`/api/payments/${op.id}/refund/pdf`}
+                    token={token}
+                    filename={`refund-${op.invoiceNumber}.pdf`}
                   >
                     📄 Download Credit Note PDF
-                  </a>
+                  </DocumentDownload>
                   {op.refundExplorerUrl && (
                     <a
                       href={op.refundExplorerUrl}

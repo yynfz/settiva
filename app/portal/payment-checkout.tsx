@@ -16,10 +16,12 @@ export function PaymentCheckout({
   token,
   invoice,
   pendingAttempts = [],
+  verificationOnly = false,
 }: {
   token: string;
   invoice: PublicInvoice;
   pendingAttempts?: PendingAttempt[];
+  verificationOnly?: boolean;
 }) {
   const router = useRouter();
   const connector = useRef<NearConnector | null>(null);
@@ -99,7 +101,13 @@ export function PaymentCheckout({
   }
 
   async function pay() {
-    if (!connector.current || invoice.checkoutEnabled === false || busy) return;
+    if (
+      !connector.current ||
+      verificationOnly ||
+      invoice.checkoutEnabled === false ||
+      busy
+    )
+      return;
     setBusy(true);
     setMessage("Review and authorize this transfer in your wallet.");
     try {
@@ -136,7 +144,7 @@ export function PaymentCheckout({
     }
   }
 
-  if (invoice.checkoutEnabled === false)
+  if (invoice.checkoutEnabled === false && !verificationOnly)
     return <p>Mainnet payments are unavailable.</p>;
 
   const hasPending = pendingAttempts.length > 0;
@@ -144,9 +152,13 @@ export function PaymentCheckout({
   return (
     <section
       className="bg-white rounded-xl border p-6 mt-6 space-y-3"
-      aria-label="Pay invoice"
+      aria-label={
+        verificationOnly ? "Verify an existing transfer" : "Pay invoice"
+      }
     >
-      <h2 className="text-xl font-bold">Pay this invoice</h2>
+      <h2 className="text-xl font-bold">
+        {verificationOnly ? "Verify an existing transfer" : "Pay this invoice"}
+      </h2>
 
       {/* Recovery banner: shown when pending attempts exist on page load */}
       {hasPending && (
@@ -180,22 +192,23 @@ export function PaymentCheckout({
         separately. Token storage registration may require a separate wallet
         approval.
       </p>
-      {!connectedAccount ? (
-        <button disabled={busy} onClick={connect} className="primary-button">
-          Connect {invoice.network} wallet
-        </button>
-      ) : (
-        <>
-          <p>Payer: {connectedAccount}</p>
-          <button
-            disabled={busy || submitted}
-            onClick={pay}
-            className="primary-button"
-          >
-            Authorize payment
+      {!verificationOnly &&
+        (!connectedAccount ? (
+          <button disabled={busy} onClick={connect} className="primary-button">
+            Connect {invoice.network} wallet
           </button>
-        </>
-      )}
+        ) : (
+          <>
+            <p>Payer: {connectedAccount}</p>
+            <button
+              disabled={busy || submitted}
+              onClick={pay}
+              className="primary-button"
+            >
+              Authorize payment
+            </button>
+          </>
+        ))}
       <details>
         <summary>Already sent a payment? Verify it here</summary>
         <label className="block">

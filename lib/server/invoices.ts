@@ -464,25 +464,9 @@ export async function getInvoiceByIdForMerchant(
 }
 
 export function resolveOrigin(request: Request): string {
-  const forwardedHost = request.headers.get("x-forwarded-host");
-  const forwardedProto = request.headers.get("x-forwarded-proto") || "https";
-  if (forwardedHost) {
-    return `${forwardedProto}://${forwardedHost}`;
-  }
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL;
-  if (appUrl) {
-    return appUrl.replace(/\/+$/, "");
-  }
-  const host = request.headers.get("host");
-  if (host && !host.startsWith("0.0.0.0")) {
-    const proto = request.headers.get("x-forwarded-proto") || "http";
-    return `${proto}://${host}`;
-  }
-  try {
-    const url = new URL(request.url);
-    if (!url.hostname.startsWith("0.0.0.0")) {
-      return url.origin;
-    }
-  } catch {}
-  return "https://settiva.expekerja.com";
+  const configured = process.env.NEXT_PUBLIC_APP_URL;
+  const origin = new URL(configured || request.url);
+  if (!["http:", "https:"].includes(origin.protocol))
+    throw new Error("Set an HTTP(S) NEXT_PUBLIC_APP_URL.");
+  return origin.origin;
 }

@@ -11,3 +11,8 @@ next-env.d.ts
 README.md
 AGENTS.md
 GLOSSARY.md
+
+.env*
+!.env.example
+.test-cache
+.agents
