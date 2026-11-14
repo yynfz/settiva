@@ -576,3 +576,27 @@ footer {
   margin: 8px 0 16px;
   font-size: 13px;
 }
+.primary-button {
+  background: var(--green);
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  font-size: 15px;
+  font-weight: 600;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+.primary-button:hover:not(:disabled) {
+  background: #143d2c;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.primary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

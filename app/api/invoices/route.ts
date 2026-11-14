@@ -3,6 +3,7 @@ import { z } from "zod";
 import {
   createInvoiceForMerchant,
   listInvoicesForMerchant,
+  resolveOrigin,
 } from "@/lib/server/invoices";
 import {
   failure,
@@ -33,7 +34,7 @@ const createInvoiceSchema = z.object({
 export async function GET(request: NextRequest) {
   try {
     const { userId } = await requireMerchant(request);
-    const origin = request.nextUrl.origin;
+    const origin = resolveOrigin(request);
     const invoices = await listInvoicesForMerchant(userId, origin);
     return respond({ invoices });
   } catch (error) {
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const origin = request.nextUrl.origin;
+    const origin = resolveOrigin(request);
     const invoice = await createInvoiceForMerchant(userId, parsed.data, origin);
 
     return respond({ invoice }, 201);

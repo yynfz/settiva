@@ -36,14 +36,26 @@ export function database(token?: string) {
   );
 }
 export async function requireMerchant(request: Request) {
+  let token: string | undefined;
   const authorization = request.headers.get("authorization");
-  if (!authorization?.startsWith("Bearer "))
+  if (authorization?.startsWith("Bearer ")) {
+    token = authorization.slice(7);
+  } else {
+    try {
+      const url = new URL(request.url);
+      const queryToken = url.searchParams.get("token");
+      if (queryToken) token = queryToken;
+    } catch {
+      // Invalid URL or relative path
+    }
+  }
+
+  if (!token)
     throw new RequestError(
       401,
       "unauthenticated",
       "Sign in with an invited merchant account.",
     );
-  const token = authorization.slice(7);
   const client = database(token);
   const {
     data: { user },

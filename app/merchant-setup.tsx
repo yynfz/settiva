@@ -531,13 +531,17 @@ function InvoiceManager({
   }
 
   async function copyPortalLink(invoice: Invoice) {
+    const url =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/portal/${invoice.access_token}`
+        : invoice.portal_url;
     try {
-      await navigator.clipboard.writeText(invoice.portal_url);
+      await navigator.clipboard.writeText(url);
       setCopiedId(invoice.id);
       setTimeout(() => setCopiedId(null), 2000);
     } catch {
       // Fallback
-      prompt("Copy Customer Portal link:", invoice.portal_url);
+      prompt("Copy Customer Portal link:", url);
     }
   }
 
@@ -735,17 +739,15 @@ function InvoiceManager({
                 <div className="invoice-card-main">
                   <div className="invoice-card-header">
                     <span className="invoice-num">{inv.invoice_number}</span>
-                    <span>{inv.badge}</span>
                     <span
-                      className={`status-pill ${
-                        inv.status === "paid"
-                          ? "paid"
-                          : inv.is_overdue
-                            ? "overdue"
-                            : inv.status === "viewed"
-                              ? "viewed"
-                              : "unpaid"
-                      }`}
+                      className={`status-pill ${inv.status === "paid"
+                        ? "paid"
+                        : inv.is_overdue
+                          ? "overdue"
+                          : inv.status === "viewed"
+                            ? "viewed"
+                            : "unpaid"
+                        }`}
                     >
                       {inv.is_overdue && inv.status !== "paid"
                         ? "OVERDUE"
@@ -773,7 +775,7 @@ function InvoiceManager({
                       {copiedId === inv.id ? "✓ Copied!" : "Copy Link"}
                     </button>
                     <a
-                      href={`/api/invoices/${inv.id}/pdf`}
+                      href={`/api/invoices/${inv.id}/pdf${session?.access_token ? `?token=${encodeURIComponent(session.access_token)}` : ""}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="btn-sm"
@@ -782,7 +784,11 @@ function InvoiceManager({
                       PDF
                     </a>
                     <a
-                      href={inv.portal_url}
+                      href={
+                        typeof window !== "undefined"
+                          ? `${window.location.origin}/portal/${inv.access_token}`
+                          : inv.portal_url
+                      }
                       target="_blank"
                       rel="noopener noreferrer"
                       className="btn-sm"
@@ -1020,7 +1026,7 @@ function OverpaymentSection({
                   }}
                 >
                   <a
-                    href={`/api/payments/${op.id}/refund/pdf`}
+                    href={`/api/payments/${op.id}/refund/pdf${token ? `?token=${encodeURIComponent(token)}` : ""}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="btn-sm"

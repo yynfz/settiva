@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getInvoiceByIdForMerchant } from "@/lib/server/invoices";
+import {
+  getInvoiceByIdForMerchant,
+  resolveOrigin,
+} from "@/lib/server/invoices";
 import { failure, requireMerchant } from "@/lib/server/merchant";
 import { generateInvoicePdf } from "@/lib/server/pdf";
 
@@ -10,7 +13,7 @@ export async function GET(
   try {
     const { userId } = await requireMerchant(request);
     const { id } = await context.params;
-    const origin = request.nextUrl.origin;
+    const origin = resolveOrigin(request);
     const invoice = await getInvoiceByIdForMerchant(id, userId, origin);
     const pdfBuffer = generateInvoicePdf(invoice);
 
