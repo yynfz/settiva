@@ -1,0 +1,16 @@
+# Local installation of the one-time repository setup skill.
+/.agents/skills/setup-matt-pocock-skills/
+
+# Installer metadata currently containing only that setup skill.
+/skills-lock.json
+
+.env*
+!.env.example
+
+node_modules/
+.next/
+.test-cache/
+coverage/
+test-results/
+*.tsbuildinfo
+next-env.d.ts

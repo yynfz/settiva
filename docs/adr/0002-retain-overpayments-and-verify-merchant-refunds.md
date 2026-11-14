@@ -1,0 +1,3 @@
+# Retain overpayments and verify merchant refunds
+
+Multiple successful transfers can reach a merchant for one invoice. Preserve every distinct verified matching payment, apply only the first successfully recorded payment to the invoice, and classify the rest as overpayments needing refund instead of rejecting evidence that funds arrived. The merchant authorizes the full return transfer from the invoice's original receiving account to the original payer; Settiva verifies its evidence before marking that overpayment refunded, preserving the original receipt and requiring neither custody nor automatic spending authority.

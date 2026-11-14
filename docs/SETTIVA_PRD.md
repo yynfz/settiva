@@ -1,4 +1,4 @@
-# Settiva — Native USDC Invoicing MVP PRD (v2.1)
+# Settiva — Native USDC Invoicing MVP PRD (v2.3)
 
 **Product brand:** Settiva (selected by the project lead on 11 November 2026). **Tagline:** *Invoice globally. Settle with USDC.* This is the project name used throughout the MVP, README, dashboard, demo and hackathon submission. It is not an assertion of trademark or domain availability; clear those before public commercial launch.
 
@@ -41,20 +41,32 @@ Circle confirms **native USDC** (NEP-141) exists on NEAR. **It is not the bridge
 - NEP-141 and storage requirements: https://docs.near.org/primitives/ft/standard
 - NEAR RPC transactions: https://docs.near.org/api/rpc/transactions
 
-**Testnet reality check:** Circle lists a testnet token address; that does **not** mean free testnet USDC is automatically available. Verify its onchain metadata and fund two development accounts. If testnet USDC cannot be obtained promptly, use a **clearly labeled, separately allowlisted testnet NEP-141 test token** to exercise the exact transfer/verifier code; do not label it genuine Circle USDC. A real native Circle USDC payment on mainnet is then the required proof for the mainnet-USDC claim, subject to human authorization and lawful operation. Never simulate a successful payment.
+**Testnet reality check:** Circle lists a testnet token address; that does **not** mean free testnet USDC is automatically available. Verify its onchain metadata and fund two development accounts. Time-box testnet USDC funding investigation to one hour. If no usable funded path is established within that hour, use a **clearly labeled, separately allowlisted testnet NEP-141 test token** to exercise the exact transfer/verifier code; label it **“Test token — no monetary value”** and show its actual asset identity on invoices and receipts. Freeze its separately allowlisted contract and verified metadata on issuance; never substitute assets on an existing invoice. This fallback is testnet-only; mainnet accepts native Circle USDC only. A real native Circle USDC payment on mainnet is then the required proof for the mainnet-USDC claim, subject to human authorization and lawful operation. Never simulate a successful payment.
 
 ## 3. MVP product experience
 
-1. Merchant signs in (Supabase Auth) and connects or manually sets a **merchant-controlled receiving wallet** for a selected network. App verifies account format and token-storage registration before issuing the invoice.
-2. Merchant creates a USD invoice (client label, description, one amount, due date optional). Amount is fixed as a **USDC decimal amount**, e.g., `5.25` USDC, stored in **integer atomic units** (`5250000` for 6 decimals).
+1. An explicitly invited merchant signs in (Supabase Auth) and connects or manually sets a **merchant-controlled receiving wallet** for a selected network. App verifies account format and token-storage registration before issuing the invoice. Public merchant registration is outside the MVP; invite-only access is enforced server-side. Manual receiving-account entry is permitted after the merchant explicitly confirms “I control this receiving account” and confirms the destination. Format/storage checks do not constitute cryptographic ownership proof; the MVP makes no verified-ownership claim.
+2. Merchant creates a USD invoice (client label, description, one amount, due date optional). For USDC, the USD invoice amount fixes the requested USDC decimal amount, e.g., `5.25` USDC, stored in **integer atomic units** (`5250000` for 6 decimals). Test-token fallback invoices are demonstrations with an explicit test-token amount and no monetary-value claim.
 3. Invoice is issued with immutable `network`, `token_contract_id`, `recipient_account_id`, `amount_atomic`, and a random one-time `payment_reference`. Public link is copyable.
-4. Payer opens public invoice without an app account. UI explicitly displays **NEAR / USDC / network**, receiving wallet and transfer amount. It warns that a payer needs **USDC plus a small NEAR balance for gas**, and that wallet connection is required for the MVP.
+4. Payer opens public invoice without an app account. UI explicitly displays **NEAR / actual asset / network**, receiving wallet and transfer amount. It warns that a payer needs **the requested token plus a small NEAR balance for gas**, and that wallet connection is required for the MVP.
 5. Payer connects a wallet on the invoice's exact network and explicitly signs **one NEP-141 `ft_transfer` contract call**, with `receiver_id`, `amount` (atomic integer string), and `memo` containing the invoice's opaque one-time reference. Attach **exactly 1 yoctoNEAR** to the call and reasonable gas as supported by the wallet/NEAR SDK. Funds go **directly from the payer's wallet to the merchant**, not to the app.
 6. Wallet returns a transaction hash (or redirects and returns later). App verifies asynchronously; if the response is lost, the payer can paste `txHash + senderAccountId`. **Never ask them to pay again automatically** merely because the response timed out.
-7. Backend independently queries the correct network RPC with `wait_until: 'FINAL'`, checks successful execution of the whole relevant transaction/receipts, exact token contract, single expected `ft_transfer` action, sender, merchant recipient, exact atomic amount, and exact payment reference. It checks that the hash has not already paid another invoice and the invoice is eligible, then atomically sets `paid`.
-8. Public receipt displays amount, token, network, recipient, sender, finalized transaction hash, timestamp and an appropriate network explorer link; merchant can export invoice/payment CSV.
+7. Backend independently queries the correct network RPC with `wait_until: 'FINAL'`, checks successful execution of the whole relevant transaction/receipts, exact token contract, single expected `ft_transfer` action, sender, merchant recipient, exact atomic amount, and exact payment reference. It checks transaction uniqueness and atomically records the verified payment. The first recorded matching payment sets the invoice to `paid`; subsequent distinct matching payments are retained as overpayments requiring refund.
+8. Public receipt displays amount, token, network, recipient, sender, finalized transaction hash, timestamp and an appropriate network explorer link. Invoice/payment CSV export is P1.
 
-**Identity and reconciliation:** the `memo` includes a high-entropy opaque reference unique to the invoice. It is publicly visible onchain: no names, emails, invoice descriptions, or customer PII in the memo. A transfer with no matching memo **must not be auto-credited**; show `Needs manual review` and do not issue a paid receipt until a separately approved future reconciliation workflow exists. This is intentional to prevent one unrelated transfer from paying another invoice.
+**Identity and reconciliation:** the `memo` includes a high-entropy opaque reference unique to the invoice. It is publicly visible onchain: no names, emails, invoice descriptions, or customer PII in the memo. A transfer with no matching memo **must not be auto-credited**. Show the mismatch on that payment attempt and explain that funds may have moved without satisfying the invoice; the MVP provides no manual crediting workflow. An invalid attempt does not block a later valid payment or its receipt.
+
+**Invoice and attempt states:** an invoice is `unpaid` until a matching verified payment atomically makes it `paid`. Pending confirmation, failed execution, and mismatched verification describe individual payment attempts, not invoice states. Display pending confirmation for the relevant attempt without implying the invoice is paid. Persist submitted transaction hashes, claimed sender accounts, invoice associations, and verification outcomes server-side. Retry verification while the invoice page is open and resume on reopening; background monitoring is outside the MVP. If the hash never reaches Settiva, guide the payer to retrieve it from wallet history and submit it. An uncertain result must never automatically trigger another transfer.
+
+**Payer identity:** any payer may satisfy an invoice with a fully matching transfer. Verify that the actual onchain sender matches the submitted sender account; do not restrict payment to the private client label or a preassigned payer wallet. Record the actual sender on the receipt.
+
+**Duplicate payments and refunds:** repeated verification of the same transaction returns its existing result. The first fully matching payment successfully recorded by Settiva satisfies the invoice; each later distinct fully matching transfer is recorded as an overpayment, shown to the merchant and affected payer as **“Overpayment — refund needed.”** The merchant manually authorizes a separate return transfer from the invoice's original receiving account, returning the full extra token amount in the same asset/network to that payment's original sender, then submits its transaction hash. Refunds from other accounts do not satisfy the MVP verification rules. Settiva independently verifies the return transfer before showing **“Overpayment — refunded.”** Submission, wallet approval, pending execution, or verification failure never proves a refund. The invoice remains paid and its original receipt is unchanged. Settiva holds no funds and performs no automatic refunds. Detection requires submission of the additional payment's transaction hash; background wallet monitoring remains deferred.
+
+**Refund scope:** the MVP verifies refunds for additional fully matching payments only. Two separate correct 10-token payments for a 10-token invoice produce one applied payment and one refundable overpayment. A single 20-token transfer, a partial payment, or a wrong-reference transfer is a mismatch: do not apply it to the invoice or put it through the verified duplicate-payment refund workflow. Show the mismatch and direct resolution to the merchant; Settiva does not automatically reconcile these transfers.
+
+**Due dates:** a due date is advisory. An unpaid invoice past its due date is displayed as overdue and remains payable. Accept valid late payments, including payments verified after the due date. There is no invoice expiry state in the MVP.
+
+**Public information:** possession of an invoice link grants access to its public payment details and, after verified payment, its receipt. Public fields are merchant display name, amount, asset, network, receiving account, payment reference, optional due date, and invoice status. Receipts additionally expose the verified transaction proof described above. Client labels and free-text invoice descriptions remain merchant-private, including in public API responses. The invoice-owning merchant can see the full attempt, overpayment, and refund history. Public invoice/receipt responses do not enumerate that history. A rate-limited lookup scoped to the invoice and a specific transaction hash returns only that transfer's status and relevant payment/refund proof. Knowledge of a publicly visible hash is not proof of payer identity; the lookup grants no signing, refund-submission, or merchant-data privileges.
 
 **Wallet/storage caveat:** the recipient account must have storage registered with the USDC contract. Check `storage_balance_of` (or contract-specific equivalent) before invoice issuance; guide the merchant through a separate wallet-approved `storage_deposit` where needed, subject to the contract's rules, network charges and user consent. A merchant should never unknowingly publish an unreceivable invoice. Both payer and merchant must use wallet/account configurations compatible with the selected NEAR network.
 
@@ -63,37 +75,40 @@ Circle confirms **native USDC** (NEP-141) exists on NEAR. **It is not the bridge
 ### P0 — ship or do not claim completed
 
 - [ ] Network/contract allowlist and verified onchain token metadata, with wrong-network/wrong-token rejection.
-- [ ] One merchant can set a receiving wallet and create one immutable USD/USDC invoice; public invoice link works.
-- [ ] One **real, successful, finalized** NEP-141 transfer from a wallet using exact merchant recipient, amount and memo; first on testnet if funded, then a **minimal authorized mainnet USDC transfer** if permitted/available.
+- [ ] Invited merchants can sign in, set a receiving wallet, create immutable invoices, and view a basic own-invoice list; public invoice links work without payer registration.
+- [ ] Required release proof: create an invoice → one **real, successful, finalized testnet** NEP-141 transfer using the exact merchant recipient, amount and memo → independent verification → receipt. Label the actual asset accurately. Mainnet USDC proof is an optional milestone requiring separate human authorization; its absence does not block the testnet release.
 - [ ] Backend independently verifies transaction, token contract, `ft_transfer` call, `receiver_id`, amount, memo, sender, successful finalized execution, and uniqueness.
-- [ ] `Unpaid` → `Pending confirmation` → `Paid` or explicit error, with an onchain receipt and network-correct explorer link.
-- [ ] `ENABLE_MAINNET_PAYMENTS=false` by default. Mainnet checkout **requires an explicit human decision**, a separate config activation and a clearly labeled warning about real funds. Backend must enforce the flag, not just hide the button. Read-only validation of pre-existing mainnet tx evidence may remain available when checkout is off.
+- [ ] Invoice transitions from `Unpaid` to `Paid` only after verification. Individual payment attempts show pending confirmation or explicit errors; a failed attempt never blocks a valid payment. A paid invoice has an onchain receipt and network-correct explorer link.
+- [ ] `ENABLE_MAINNET_PAYMENTS=false` by default. Mainnet checkout **requires an explicit human decision**, a separate config activation and a clearly labeled warning about real funds. Backend must enforce the flag, not just hide the button. When disabled, the backend rejects new mainnet invoice issuance and reports in-app mainnet checkout disabled. Existing invoice details and receipts remain accessible. Verification against already-issued invoices remains available and may record a genuine matching transfer as paid.
+- [ ] Duplicate-payment resolution: retain each distinct verified overpayment; show refund-needed status; let the invoice-owning merchant submit a manually authorized refund transaction; verify it independently before marking the overpayment refunded.
 - [ ] Negative tests: wrong asset, bridged USDC.e, wrong network, recipient, amount, memo, sender mismatch, transaction failure, unfinalized tx, duplicate hash, concurrent verifier requests.
 - [ ] Deployable public demo, public repository, LICENSE, `.env.example`, audited setup instructions, working README examples, no credentials committed.
 
 ### P1 — only after P0 succeeds
 
-- [ ] Authenticated merchant dashboard and minimal invoice history.
+- [ ] Merchant dashboard enhancements beyond the P0 basic own-invoice list.
 - [ ] CSV export and printable browser receipt.
 - [ ] Read-only hosted sample showing **a genuinely verified** mainnet transaction (never fabricated or implied to be live until confirmed).
 - [ ] One network selector for merchants, disabled for already-issued invoices.
 
 ### P2 — explicitly after hackathon
 
-Multi-chain checkout/NEAR Intents, gas abstraction, payer fiat onramps, stablecoin swaps, subscriptions, PDF generation, email reminders, partial payments, fee monetization, advanced accounting, refunds/disputes, teams/multi-tenancy, automated wallet monitoring, mobile applications, bank payouts, enterprise compliance workflows.
+Multi-chain checkout/NEAR Intents, gas abstraction, payer fiat onramps, stablecoin swaps, subscriptions, PDF generation, email reminders, partial payments, fee monetization, advanced accounting, general refunds/disputes beyond duplicate-payment resolution, teams/multi-tenancy, automated wallet monitoring, mobile applications, bank payouts, enterprise compliance workflows.
 
-**Hard stop:** do not sacrifice actual successful USDC transfer verification to build dashboards, animations or AI features. Never claim **mainnet enabled**, **production ready**, **gasless**, **fiat-supported**, or **compliant** without proof.
+**Hard stop:** do not sacrifice actual successful transfer verification for the configured USDC or explicitly labeled testnet fallback asset to build dashboards, animations or AI features. Never claim **mainnet enabled**, **production ready**, **gasless**, **fiat-supported**, or **compliant** without proof.
 
 ## 5. UI and routes
 
 - `/` — brief commercial value proposition, testnet demo and clearly distinct *mainnet limited preview* state.
-- `/dashboard` — own invoices and payment statuses (P1; fall back to basic authenticated list).
+- `/dashboard` — basic authenticated own-invoice list and payment statuses (P0); dashboard enhancements are P1.
 - `/dashboard/new` — USD amount/description, merchant receiving account and **network selection**, plus preflight storage registration check.
 - `/invoice/[id]` — public, non-editable network/token/amount/destination; payer wallet connect, Pay USDC, recovery-by-hash and risk warnings.
-- `/invoice/[id]/receipt` — only when server records verified payment.
-- `/api/invoices` — authenticated create/list; server validates merchant ownership and canonical amount.
-- `/api/invoices/[id]/pay-config` — public **read-only** immutable invoice payment details; server reports whether mainnet payments are enabled.
+- `/invoice/[id]/receipt` — accessible to anyone with the invoice link, only when server records verified payment; excludes client label and invoice description.
+- `/api/invoices` — invited-merchant authenticated create/list; server validates ownership of the invoice/profile and canonical amount; this does not assert cryptographic control of the receiving account. Reject new mainnet invoices when mainnet payments are disabled.
+- `/api/invoices/[id]/pay-config` — public **read-only** immutable invoice payment details; server reports whether mainnet checkout is enabled, preserving existing invoice details when disabled.
 - `/api/invoices/[id]/verify` — idempotent, rate-limited server verifier accepting only `{txHash,senderAccountId}` (no `paid` state or token/amount from client).
+- `/api/invoices/[id]/transfers/[txHash]` — public, rate-limited lookup of one submitted transfer's status and relevant payment/refund proof; never lists other attempts or reveals private invoice fields.
+- `/api/payments/[id]/refund/verify` — authenticated invoice-owning merchant submits a refund transaction hash for a verified overpayment. Server derives expected asset, network, amount, original receiving account as sender, and original payer as recipient from stored evidence and independently verifies the return transfer.
 - `/api/export/invoices.csv` — authenticated own-invoice CSV (P1).
 
 The UI must never imply the user has paid when the wallet request merely succeeded locally or an RPC returned `INCLUDED`/`EXECUTED_OPTIMISTIC`. Display explicit network names; never bury mainnet vs testnet in a tooltip.
@@ -111,28 +126,33 @@ The UI must never imply the user has paid when the wallet request merely succeed
 
 - `id uuid primary key` (public high-entropy UUID)
 - `merchant_user_id uuid not null`
-- `client_label text null` (do not expose unnecessary PII publicly)
-- `description text not null`, `due_at timestamptz null`
-- `currency text not null default 'USD'`, `asset_symbol text not null default 'USDC'`
+- `client_label text null` (merchant-private)
+- `description text not null` (merchant-private), `due_at timestamptz null` (advisory; does not expire the invoice)
+- `currency text not null default 'USD'`, `asset_symbol text not null` (server-selected from the allowlisted asset; test-token fallback must not inherit a USDC label)
 - `network text not null check (network in ('testnet','mainnet'))`
 - `token_contract_id text not null` (immutable, allowlisted)
 - `recipient_account_id text not null` (immutable)
 - `amount_atomic text not null` (positive **integer string**; never JS float)
 - `token_decimals integer not null` (frozen metadata; expected 6 for native USDC)
 - `payment_reference text not null unique` (high-entropy random; **no PII**)
-- `status text not null default 'unpaid'` (`unpaid`,`pending`,`paid`,`expired`,`review_required`)
+- `status text not null default 'unpaid'` (`unpaid`,`paid`); overdue is derived from an unpaid invoice's due date
 - `created_at timestamptz`, `paid_at timestamptz null`
 
 ### Table: `payments`
 
-- `id uuid primary key`, `invoice_id uuid not null unique references invoices(id)`
+- `id uuid primary key`, `invoice_id uuid not null references invoices(id)`
 - `network text not null`, `token_contract_id text not null`
 - `tx_hash text not null`, `sender_account_id text not null`, `recipient_account_id text not null`
 - `amount_atomic text not null`, `payment_reference text not null`
 - `block_height text null`, `verified_at timestamptz not null`
-- `unique(network, tx_hash)` enforced in Postgres
+- `allocation text not null` (`applied`, `overpayment`); at most one `applied` payment per invoice, enforced by a partial unique index
+- `unique(network, tx_hash)` enforced in Postgres; the same transaction cannot be allocated twice
 
-Prefer a database transaction/RPC function with row locks that inserts `payments` and transitions `invoices` from unpaid/pending to paid **atomically**; handle repeated verifications idempotently. Enforce RLS; public invoice views only expose what is needed to pay. Never expose Supabase service-role secrets in frontend. Restrict verification abuse with rate limiting and structured server logs without sensitive invoice details.
+### Refund evidence
+
+Keep refund evidence linked to the specific overpayment. Preserve the refund transaction hash, network, token contract, actual sender and recipient, exact atomic amount, and verification timestamp. A verified return transfer can resolve only one overpayment; retries of the same proof are idempotent. Failed or pending verification leaves the refund unresolved. The detailed refund binding and persistence design must preserve these invariants.
+
+Prefer a database transaction/RPC function with row locks that inserts `payments` and transitions `invoices` from unpaid to paid **atomically**; handle repeated verifications idempotently. Persist submitted transaction evidence and attempt outcomes separately from invoice status, supporting verification retries after reopening. Retain multiple distinct verified payments per invoice, with exactly one applied payment for a paid invoice; record all others as overpayments. Refund verification updates only the associated overpayment resolution and never replaces the applied payment. Enforce RLS and the public field boundary in §3. Never expose Supabase service-role secrets in frontend. Restrict verification abuse with rate limiting and structured server logs without sensitive invoice details.
 
 ## 7. Exact NEP-141 transfer and verification
 
@@ -145,7 +165,7 @@ At the selected network, build an **authenticated wallet-signed** NEP-141 Functi
 - Decode function args to confirm `receiver_id === invoice.recipient_account_id`, `amount === invoice.amount_atomic` and `memo === invoice.payment_reference` (or `memo === 'INV:' + reference` if consistently specified).
 - Contract call attaches exactly **1 yoctoNEAR** and a documented gas budget (check wallet/library compatibility; e.g. an order of tens of Tgas; do not hardcode before verifying SDK guidance).
 - Check wallet network; never silently switch chains, sign automatically, or create payer accounts on behalf of users.
-- Display USDC amount and separate NEAR gas/storage costs. Never claim a gas-free or fee-free transfer.
+- Display the actual token amount and separate NEAR gas/storage costs. Never claim a gas-free or fee-free transfer.
 
 **Example shape only; do not paste into an SDK call until its current argument types are verified:**
 
@@ -166,14 +186,14 @@ At the selected network, build an **authenticated wallet-signed** NEP-141 Functi
 
 Given only invoice ID, hash and sender account ID from the payer:
 
-1. Load **server-stored immutable** invoice details and allowlist. Ensure invoice not already paid to a different hash and `network` is supported.
+1. Load **server-stored immutable** invoice details and allowlist. Ensure `network` is supported. An already-paid invoice still accepts verification submissions so distinct matching transfers can be recorded as overpayments.
 2. Query that **invoice network's RPC** (`tx` / appropriate status method) with hash, sender, `wait_until: 'FINAL'`. Do not accept other-network tx receipts.
 3. Ensure response is finalized and the transaction/required receipts are successfully executed, with no failed relevant outcomes; use official schema to check final execution status and receipt outcomes rather than assuming an optimistic inclusion means success.
-4. Ensure `transaction.signer_id` is the claimed sender, `transaction.receiver_id` equals **native USDC contract** for that network, and the transaction contains exactly the permitted `ft_transfer` action (do not accept mixed or potentially ambiguous batches).
+4. Ensure `transaction.signer_id` is the claimed sender, `transaction.receiver_id` equals **the invoice's immutable, server-allowlisted token contract** for that network (native USDC, or the explicitly configured testnet fallback only), and the transaction contains exactly the permitted `ft_transfer` action (do not accept mixed or potentially ambiguous batches).
 5. Decode and validate function call arguments, exact merchant `receiver_id`, exact integer atomic `amount`, exact random `memo` reference, and required `1 yoctoNEAR` attached deposit. Reject bridged/unknown token contracts.
 6. Enforce tx/block timestamp **no earlier than invoice creation**, where retrievable. If not reliably available, treat the exact unguessable memo plus unique tx hash as the primary invoice-binding invariant and disclose limitations. No third-party transfer can be auto-claimed without its exact reference.
-7. Atomically enforce `unique(network, tx_hash)` and `unique(invoice_id)`, record proof fields, and mark invoice `paid`. Competing claims must fail; same invoice + same hash rechecks are idempotent.
-8. On RPC outage, pending/failure, missing hash, wrong or duplicate payment, return an explicit pending/error result and keep the invoice **unpaid**, without inventing reversals or promising refunds. A sent transaction cannot be undone by this app.
+7. Atomically enforce `unique(network, tx_hash)` and at most one applied payment per invoice. Under an invoice row lock, the first recorded matching payment is applied and marks the invoice `paid`; later distinct matching payments are recorded as overpayments. Same invoice + same hash rechecks return the existing result. Concurrent distinct payments are both retained with only one applied.
+8. On RPC outage, pending/failure, missing hash, wrong payment or a hash claimed for another invoice, return an explicit attempt-level pending/error result without changing the invoice status. An unpaid invoice remains unpaid; a paid invoice stays paid. Do not invent reversals or claim a refund before its separate return transfer is verified. A sent transaction cannot be undone by this app.
 
 **Don't verify USDC by checking a native NEAR `Transfer` action.** USDC is an **FT contract method call**. `transaction.receiver_id` is the USDC token contract, while the merchant is encoded in the `ft_transfer` call arguments.
 
@@ -195,7 +215,7 @@ Given only invoice ID, hash and sender account ID from the payer:
 | **Nov 13** | Harden contract allowlist and race handling; **tiny mainnet USDC smoke test only after human approval** | Dashboard/receipt polish, deploy staging | Validate real transaction evidence, security/README, test cases | **If authorized: successful mainnet USDC proof; otherwise explicit testnet-only claim** |
 | **Nov 14** | Bug fixes only, freeze scope, verify production config | Mobile payment funnel and final smoke test | Record demo, secrets audit, X post for human to publish, submission checklist | **Submit by 20:00 WIB** |
 
-**Stop-loss:** if dashboard/CSV is delaying proof, cut dashboard/CSV. If token funding is a blocker, stop and report it rather than quietly switching to a mock. If official wallet integration is unstable, permit verified manual hash reconciliation from an externally signed transaction (but disclose that the in-app checkout is incomplete). The final submitted project must demonstrate at least one real, reproducible onchain payment mechanism.
+**Stop-loss:** if dashboard enhancements/CSV are delaying proof, cut them; retain the P0 basic own-invoice list. If token funding is a blocker, stop and report it rather than quietly switching to a mock. If official wallet integration is unstable, permit verified manual hash reconciliation from an externally signed transaction (but disclose that the in-app checkout is incomplete). The final submitted project must demonstrate at least one real, reproducible onchain payment mechanism.
 
 ## 10. Judge-ready acceptance tests
 
@@ -205,16 +225,28 @@ Given only invoice ID, hash and sender account ID from the payer:
 4. Correct USDC amount sent to wrong merchant or with wrong memo → **not credited**.
 5. Wrong amount, failed/pending tx, missing tx, incorrect sender, or wrong network → **not credited**.
 6. Reuse same hash for another invoice → **rejected**; retry same hash on original invoice → **idempotent**.
-7. Two concurrent verification calls → at most one payment record, no duplicate status transitions.
+7. Two concurrent verifications of the same hash → one payment record. Two distinct fully matching transfers → two payment records, exactly one applied and the other an overpayment needing refund; only one invoice transition to paid.
 8. Merchant token-storage unregistered → invoice issuance blocked with actionable registration guidance.
-9. Mainnet disabled at server → mainnet payment creation endpoint denies even if client hacks UI.
+9. Mainnet disabled at server → new mainnet invoice issuance is rejected and in-app checkout is disabled even if the client UI is modified. Existing invoice details and receipts remain accessible; a genuine matching transfer against an already-issued invoice can still be verified and recorded as paid.
 10. Repo clone + README reproduces the testnet flow without a private mainnet wallet; genuine mainnet proof is labeled as such and independently explorable **only if actually executed**.
+11. Uninvited users cannot create or list merchant invoices; invited merchants can access only their own merchant data. Payers need no account.
+12. A wrong or pending payment attempt cannot block a later valid payment or change an already-paid invoice back to unpaid.
+13. An unpaid invoice past its due date is overdue and payable; valid late settlement produces a receipt.
+14. Public invoice and receipt responses exclude client label and invoice description; possession of the invoice link grants access to the approved public fields.
+15. A valid transfer from a different payer than the merchant's named client is accepted; the receipt records the actual sender.
+16. Submitted transaction evidence survives page closure; reopening resumes verification without initiating another transfer. A missing hash leads to wallet-history recovery guidance.
+17. Test-token fallback invoices and receipts show the actual asset and “Test token — no monetary value”; they never claim native USDC settlement.
+18. A second distinct fully matching payment is recorded as an overpayment needing refund; the original applied payment and receipt remain unchanged.
+19. Submitting a refund hash does not mark it refunded. Only independently verified successful final return from the invoice's original receiving account of the full extra amount in the same asset/network to the original payer resolves the overpayment. Wrong source, destination, amount, asset/network, failed or unfinalized transfers remain unresolved.
+20. Reusing one refund transfer for another overpayment is rejected; rechecking the same refund for its original overpayment is idempotent. Unauthorized merchants cannot submit refund evidence for another merchant's payments.
+21. Public invoice/receipt responses never list payment attempts, overpayments, or refunds. Specific-transfer lookup returns only the requested transfer's status and proof; the invoice-owning merchant can access the complete history. Private invoice fields remain excluded from public responses.
+22. A single double-amount transfer is a mismatch, not an applied payment or eligible duplicate-payment refund. Two distinct exact-amount matching transfers produce one applied payment and one refundable overpayment.
 
 ## 11. Business model / post-hackathon roadmap
 
 - **Initial commercial product:** invoicing SaaS sold to legally eligible crypto-native freelancers and agencies; no custody, with hosted invoice links, independent onchain receipts, CSV and better accounting tools. Charging for software subscriptions (when lawful) is a simpler first revenue model than charging a percentage of money flows.
-- **Later:** multiple stablecoins/chains, NEAR Intents cross-chain funding, payer fiat purchase options through appropriately authorized partners, reminders, merchant team roles, payment monitoring, refunds/disputes, automated tax accounting, anti-abuse and AML/sanctions workflow as required.
-- Do not represent the app as licensed or compliant, nor promise bank settlement, payouts, refunds, or fiat conversion.
+- **Later:** multiple stablecoins/chains, NEAR Intents cross-chain funding, payer fiat purchase options through appropriately authorized partners, reminders, merchant team roles, payment monitoring, general refunds/disputes beyond duplicate-payment resolution, automated tax accounting, anti-abuse and AML/sanctions workflow as required.
+- Do not represent the app as licensed or compliant, nor promise bank settlement, payouts, automatic or guaranteed refunds, or fiat conversion.
 
 ## 12. Mandatory NEAR HACKATHON submission rules
 

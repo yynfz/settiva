@@ -1,0 +1,45 @@
+{
+  "name": "settiva",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "next typegen && tsc --noEmit",
+    "test": "node scripts/run-tests.mjs",
+    "test:setup": "node scripts/setup-tests.mjs",
+    "test:browser": "vitest run tests/merchant.browser.test.ts",
+    "near:check": "node --env-file-if-exists=.env.local scripts/check-testnet.mjs",
+    "test:fallback": "SETTIVA_TEST_ASSET=test-token vitest run tests/fallback.http.test.ts",
+    "format:check": "prettier --check app lib tests scripts package.json tsconfig.json vitest.config.ts postcss.config.mjs .github/workflows/ci.yml",
+    "merchant:invite": "node --env-file-if-exists=.env.local scripts/invite-merchant.mjs"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
+    "@tailwindcss/postcss": "^4.3.5",
+    "next": "^16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1",
+    "tailwindcss": "^4.3.5",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.65.0",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "embedded-postgres": "^18.6.0-beta.19",
+    "jose": "^6.2.17",
+    "pg": "^8.23.1",
+    "prettier": "^3.10.1",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
