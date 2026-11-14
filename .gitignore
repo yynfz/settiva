@@ -1,5 +1,5 @@
-# Local installation of the one-time repository setup skill.
-/.agents/skills/setup-matt-pocock-skills/
+# Local installation of agent skills.
+/.agents/skills/
 
 # Installer metadata currently containing only that setup skill.
 /skills-lock.json
