@@ -52,3 +52,13 @@ Browser smoke uses installed Google Chrome on macOS if present. Otherwise instal
 - [NEAR read-only RPC queries](https://docs.near.org/api/rpc/contracts)
 
 The project is non-custodial software under development. This testnet setup does not establish production readiness or authorization for commercial payment services. The PRD records the project's commercial and jurisdiction-review limits.
+
+## Testnet payment checkout (#4)
+
+Apply migration `202611140003_payments.sql` after the invoice migration. The customer portal uses NEAR Connect for explicit wallet approval of one `ft_transfer` with the invoice's frozen contract, recipient, amount, memo, and 1 yoctoNEAR deposit. Wallet connection does not authorize payment. Gas and any separate token-storage deposit require NEAR.
+
+Verification accepts the portal identifier, transaction hash, and claimed sender only. It checks the testnet RPC chain, `FINAL` execution, transaction action and successful contract receipt, then records payment under an invoice lock. Repeated transaction submissions return existing evidence. Additional distinct matching transfers are retained as overpayments without replacing the original receipt; refund workflow remains a later ticket. If wallet approval or verification is uncertain, inspect wallet activity and use **Verify payment** instead of sending again.
+
+Verified receipts appear in the portal and can be downloaded from `/api/portal/[token]/receipt/pdf`. Merchants use the authenticated `/api/invoices/[id]/receipt/pdf` endpoint. Receipt evidence and the paid state survive later verification failures. The payment tests use real isolated PostgreSQL/RLS with controlled RPC and a test wallet injected through NEAR Connect's external interface; they do not prove a live funded transfer. No hosted migration, funding, signing, or deployment was performed for this implementation.
+
+Current integration references: [NEAR Connect wallet guidance](https://docs.near.org/web3-apps/tutorials/wallet-login), [NEAR transaction finality and RPC](https://docs.near.org/api/rpc/transactions). Wallet Selector is deprecated in the current NEAR guidance; this implementation uses `@hot-labs/near-connect`.

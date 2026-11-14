@@ -374,11 +374,25 @@ export async function getPublicInvoiceByToken(
         status: "viewed",
         viewed_at: new Date().toISOString(),
       })
-      .eq("id", invoiceData.id);
+      .eq("id", invoiceData.id)
+      .eq("status", "unpaid");
     invoiceData.status = "viewed";
   }
 
-  const asset = configuredAsset();
+  const asset = {
+    kind: invoiceData.asset_kind,
+    contract: invoiceData.token_contract_id,
+    name:
+      invoiceData.asset_kind === "circle-usdc"
+        ? "USDC"
+        : invoiceData.asset_symbol,
+    symbol: invoiceData.asset_symbol,
+    decimals: invoiceData.token_decimals,
+    label:
+      invoiceData.asset_kind === "circle-usdc"
+        ? "Circle testnet USDC — no monetary value"
+        : "Test token — no monetary value",
+  };
   const isOverdue = isInvoiceOverdue(invoiceData.status, invoiceData.due_date);
   const items = (invoiceData.invoice_items || [])
     .sort((a: any, b: any) => a.sort_order - b.sort_order)

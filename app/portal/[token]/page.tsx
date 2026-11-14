@@ -1,5 +1,5 @@
-import { headers } from "next/headers";
-import Link from "next/link";
+import { appliedReceipt, paymentInvoice } from "@/lib/server/payments";
+import { PaymentCheckout } from "../payment-checkout";
 import { notFound } from "next/navigation";
 import { getPublicInvoiceByToken } from "@/lib/server/invoices";
 
@@ -22,6 +22,7 @@ export default async function CustomerPortalPage({
     throw err;
   }
 
+  const receipt = await appliedReceipt(await paymentInvoice(token));
   const isOverdue = invoice.isOverdue;
   const statusDisplay =
     isOverdue && invoice.status !== "paid"
@@ -242,6 +243,34 @@ export default async function CustomerPortalPage({
           </div>
         </div>
 
+        {!receipt && <PaymentCheckout token={token} invoice={invoice} />}
+        {receipt && (
+          <section
+            className="bg-white rounded-xl border p-6 mt-6"
+            aria-label="Verified payment receipt"
+          >
+            <h2 className="text-xl font-bold">Verified payment receipt</h2>
+            <p>
+              {receipt.amountDisplay} {receipt.assetSymbol} received from{" "}
+              {receipt.senderAccount}
+            </p>
+            <p>Finalized at {receipt.blockTimestamp}</p>
+            <a
+              className="block break-all underline"
+              href={receipt.explorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {receipt.transactionHash}
+            </a>
+            <a
+              className="block underline mt-3"
+              href={`/api/portal/${token}/receipt/pdf`}
+            >
+              Download payment receipt PDF
+            </a>
+          </section>
+        )}
         {/* Footer */}
         <footer className="text-center text-xs text-[#8c9c90] mt-8">
           Settiva • Powered by InvoiceShelf architecture & NEAR Protocol

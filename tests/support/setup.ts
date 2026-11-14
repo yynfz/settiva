@@ -173,6 +173,7 @@ export default async function setup(project: TestProject) {
     });
     await waitFor(`http://127.0.0.1:${restPort}`, rest);
     let rpcScenario = "ready";
+    let transactionEvidence: unknown;
     const fallback = process.env.SETTIVA_TEST_ASSET === "test-token";
     server = createServer(async (req, res) => {
       try {
@@ -189,6 +190,11 @@ export default async function setup(project: TestProject) {
         if (url.pathname === "/__reset") {
           rpcScenario = "ready";
           await client!.query("delete from public.merchant_profiles");
+          send(res, {});
+          return;
+        }
+        if (url.pathname === "/__transaction") {
+          transactionEvidence = await jsonBody(req);
           send(res, {});
           return;
         }
@@ -287,6 +293,21 @@ export default async function setup(project: TestProject) {
               result: {
                 chain_id:
                   rpcScenario === "wrong-network" ? "mainnet" : "testnet",
+              },
+            });
+            return;
+          }
+          if (call.method === "tx") {
+            send(res, { result: transactionEvidence });
+            return;
+          }
+          if (call.method === "block") {
+            send(res, {
+              result: {
+                header: {
+                  hash: "settlement-block",
+                  timestamp_nanosec: "1794618000000000000",
+                },
               },
             });
             return;
