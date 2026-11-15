@@ -1,7 +1,7 @@
 import "server-only";
 import { networkPolicy } from "./network";
 import crypto from "node:crypto";
-import { configuredAsset } from "@/lib/asset";
+import { checkReceivingAccount } from "./near";
 import type {
   CreateInvoiceInput,
   Invoice,
@@ -57,28 +57,32 @@ export function parseExactAmountToAtomic(
 }
 
 export function computeItemTotal(
-  quantity: number,
+  quantity: string,
   unitPriceStr: string,
   decimals: number,
 ): { totalDisplay: string; totalAtomic: string } {
-  if (quantity <= 0 || !Number.isFinite(quantity)) {
-    throw new RequestError(
-      422,
-      "invalid_quantity",
-      "Quantity must be greater than zero",
-    );
-  }
-
   const { atomic: unitAtomic } = parseExactAmountToAtomic(
     unitPriceStr,
     decimals,
   );
-  // Integer arithmetic: (unitAtomic * quantity)
-  // For fractional quantity up to 4 decimal places:
-  const qtyDecimals = 4;
-  const qtyScaled = BigInt(Math.round(quantity * 10 ** qtyDecimals));
-  const totalAtomicBigInt =
-    (BigInt(unitAtomic) * qtyScaled) / BigInt(10 ** qtyDecimals);
+  const quantityText = String(quantity);
+  if (!/^\d{1,16}(\.\d{1,4})?$/.test(quantityText)) {
+    throw new RequestError(
+      422,
+      "invalid_quantity",
+      "Quantity must be an exact positive number with at most four decimal places.",
+    );
+  }
+  const [whole, fraction = ""] = quantityText.split(".");
+  const denominator = 10n ** BigInt(fraction.length);
+  const product = BigInt(unitAtomic) * BigInt(whole + fraction);
+  if (product % denominator !== 0n)
+    throw new RequestError(
+      422,
+      "subatomic_total",
+      "Item total has a fraction of one token atomic unit. Adjust quantity or unit price.",
+    );
+  const totalAtomicBigInt = product / denominator;
 
   if (totalAtomicBigInt <= 0n) {
     throw new RequestError(
@@ -91,7 +95,9 @@ export function computeItemTotal(
   const atomicStr = totalAtomicBigInt.toString();
   const len = atomicStr.length;
   let display: string;
-  if (len <= decimals) {
+  if (decimals === 0) {
+    display = atomicStr;
+  } else if (len <= decimals) {
     const frac = atomicStr.padStart(decimals, "0");
     display = `0.${frac}`.replace(/0+$/, "").replace(/\.$/, ".00");
   } else {
@@ -141,6 +147,18 @@ export async function createInvoiceForMerchant(
 
   const merchant = profile as unknown as MerchantProfile;
   const decimals = merchant.token_decimals;
+  const checked = await checkReceivingAccount(merchant.testnet_wallet_id);
+  if (
+    checked.asset.contract !== merchant.token_contract_id ||
+    checked.asset.decimals !== merchant.token_decimals ||
+    checked.asset.kind !== merchant.asset_kind ||
+    checked.asset.symbol !== merchant.asset_symbol
+  )
+    throw new RequestError(
+      409,
+      "asset_configuration_changed",
+      "Reconfirm your receiving account before issuing invoices with the current asset.",
+    );
 
   // 2. Validate items
   if (!input.items || input.items.length === 0) {
@@ -162,7 +180,7 @@ export async function createInvoiceForMerchant(
   let totalAtomicSum = 0n;
   const processedItems: {
     description: string;
-    quantity: number;
+    quantity: string;
     unit_price: string;
     total: string;
     sort_order: number;
@@ -198,7 +216,9 @@ export async function createInvoiceForMerchant(
   const atomicStr = totalAtomicSum.toString();
   const len = atomicStr.length;
   let amountDisplay: string;
-  if (len <= decimals) {
+  if (decimals === 0) {
+    amountDisplay = atomicStr;
+  } else if (len <= decimals) {
     const frac = atomicStr.padStart(decimals, "0");
     amountDisplay = `0.${frac}`.replace(/0+$/, "").replace(/\.$/, ".00");
   } else {
@@ -206,16 +226,6 @@ export async function createInvoiceForMerchant(
     const fracPart = atomicStr.slice(len - decimals).replace(/0+$/, "");
     amountDisplay = fracPart ? `${intPart}.${fracPart}` : `${intPart}.00`;
   }
-
-  // 3. Sequential invoice numbering
-  const { data: existingInvoices } = await db
-    .from("invoices")
-    .select("id")
-    .eq("merchant_id", userId);
-
-  const nextSeq = (existingInvoices?.length ?? 0) + 1;
-  const currentYear = new Date().getUTCFullYear();
-  const invoiceNumber = `INV-${currentYear}-${String(nextSeq).padStart(4, "0")}`;
 
   // 4. Crypto-secure payment reference & access token
   const paymentReference = crypto.randomBytes(32).toString("hex");
@@ -234,66 +244,41 @@ export async function createInvoiceForMerchant(
     dueDate = input.dueDate;
   }
 
-  // 5. Insert invoice
-  const { data: invoiceData, error: invoiceError } = await db
-    .from("invoices")
-    .insert({
-      merchant_id: userId,
-      invoice_number: invoiceNumber,
-      access_token: accessToken,
-      payment_reference: paymentReference,
-      network: "testnet",
-      token_contract_id: merchant.token_contract_id,
-      asset_symbol: merchant.asset_symbol,
-      token_decimals: merchant.token_decimals,
-      asset_kind: merchant.asset_kind,
-      receiving_account: merchant.testnet_wallet_id,
-      amount_atomic: atomicStr,
-      amount_display: amountDisplay,
-      status: "unpaid",
-      due_date: dueDate,
-      client_label: input.clientLabel.trim(),
-      description: input.description?.trim() || null,
-    })
-    .select()
-    .single();
-
-  if (invoiceError || !invoiceData) {
+  const { data: invoiceData, error: invoiceError } = await db.rpc(
+    "issue_invoice",
+    {
+      p_merchant: userId,
+      p_terms: {
+        access_token: accessToken,
+        payment_reference: paymentReference,
+        network: "testnet",
+        token_contract_id: merchant.token_contract_id,
+        asset_symbol: merchant.asset_symbol,
+        token_decimals: decimals,
+        asset_kind: merchant.asset_kind,
+        receiving_account: merchant.testnet_wallet_id,
+        amount_atomic: atomicStr,
+        amount_display: amountDisplay,
+        due_date: dueDate,
+        client_label: input.clientLabel.trim(),
+        description: input.description?.trim() || null,
+      },
+      p_items: processedItems,
+    },
+  );
+  if (invoiceError || !invoiceData)
     throw new RequestError(
-      500,
+      503,
       "invoice_creation_failed",
-      "Failed to record invoice",
-      invoiceError?.message,
+      "Invoice could not be issued. Check the details and try again.",
     );
-  }
-
-  // 6. Insert items
-  const itemsToInsert = processedItems.map((item) => ({
-    invoice_id: invoiceData.id,
-    ...item,
-  }));
-
-  const { data: itemsData, error: itemsError } = await db
-    .from("invoice_items")
-    .insert(itemsToInsert)
-    .select();
-
-  if (itemsError) {
-    throw new RequestError(
-      500,
-      "items_creation_failed",
-      "Failed to record invoice items",
-      itemsError.message,
-    );
-  }
-
   const portalUrl = `${origin}/portal/${accessToken}`;
   const isOverdue = isInvoiceOverdue(invoiceData.status, invoiceData.due_date);
 
   return {
     ...invoiceData,
     is_overdue: isOverdue,
-    items: (itemsData ?? []) as InvoiceItem[],
+    items: invoiceData.items as InvoiceItem[],
     portal_url: portalUrl,
   } as Invoice;
 }
@@ -402,7 +387,7 @@ export async function getPublicInvoiceByToken(
     .sort((a: any, b: any) => a.sort_order - b.sort_order)
     .map((item: any) => ({
       description: item.description,
-      quantity: Number(item.quantity),
+      quantity: item.quantity,
       unitPrice: item.unit_price,
       total: item.total,
     }));

@@ -1,4 +1,5 @@
 "use client";
+import { InvoiceHistory } from "./invoice-history";
 
 import {
   createClient,
@@ -532,7 +533,7 @@ function InvoiceManager({
   const [description, setDescription] = useState("");
   const [dueDate, setDueDate] = useState("");
   const [items, setItems] = useState<CreateInvoiceItemInput[]>([
-    { description: "", quantity: 1, unitPrice: "" },
+    { description: "", quantity: "1", unitPrice: "" },
   ]);
   const [formBusy, setFormBusy] = useState(false);
   const [formError, setFormError] = useState("");
@@ -559,7 +560,7 @@ function InvoiceManager({
   }, [session.access_token]);
 
   function addItem() {
-    setItems([...items, { description: "", quantity: 1, unitPrice: "" }]);
+    setItems([...items, { description: "", quantity: "1", unitPrice: "" }]);
   }
 
   function removeItem(index: number) {
@@ -602,7 +603,7 @@ function InvoiceManager({
           dueDate: dueDate || undefined,
           items: items.map((it) => ({
             description: it.description,
-            quantity: Number(it.quantity),
+            quantity: it.quantity,
             unitPrice: it.unitPrice,
           })),
         }),
@@ -617,7 +618,7 @@ function InvoiceManager({
       setClientLabel("");
       setDescription("");
       setDueDate("");
-      setItems([{ description: "", quantity: 1, unitPrice: "" }]);
+      setItems([{ description: "", quantity: "1", unitPrice: "" }]);
       await loadInvoices();
     } catch (err: any) {
       setFormError(err.message || "Failed to create invoice");
@@ -893,6 +894,10 @@ function InvoiceManager({
                     </a>
                   </div>
                 </div>
+                <InvoiceHistory
+                  invoiceId={inv.id}
+                  token={session.access_token}
+                />
                 <OverpaymentSection
                   invoice={inv}
                   token={session.access_token}

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { parse, isLosslessNumber } from "lossless-json";
 import {
   createInvoiceForMerchant,
   listInvoicesForMerchant,
@@ -12,24 +13,32 @@ import {
   respond,
 } from "@/lib/server/merchant";
 
-const createInvoiceSchema = z.object({
-  clientLabel: z.string().min(1).max(100),
-  description: z.string().max(1000).optional(),
-  dueDate: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Due date must be YYYY-MM-DD")
-    .optional(),
-  network: z.literal("testnet").optional().default("testnet"),
-  items: z
-    .array(
-      z.object({
-        description: z.string().min(1).max(200),
-        quantity: z.number().positive(),
-        unitPrice: z.string().regex(/^\d+(\.\d+)?$/, "Invalid unit price"),
-      }),
-    )
-    .min(1, "At least one line item is required"),
-});
+const createInvoiceSchema = z
+  .object({
+    clientLabel: z.string().min(1).max(100),
+    description: z.string().max(1000).optional(),
+    dueDate: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Due date must be YYYY-MM-DD")
+      .optional(),
+    network: z.literal("testnet").optional().default("testnet"),
+    items: z
+      .array(
+        z
+          .object({
+            description: z.string().min(1).max(200),
+            quantity: z
+              .string()
+              .regex(/^\d{1,16}(\.\d{1,4})?$/)
+              .refine((value) => BigInt(value.replace(".", "")) > 0n),
+            unitPrice: z.string().regex(/^\d+(\.\d+)?$/, "Invalid unit price"),
+          })
+          .strict(),
+      )
+      .min(1, "At least one line item is required")
+      .max(100),
+  })
+  .strict();
 
 export async function GET(request: NextRequest) {
   try {
@@ -48,7 +57,13 @@ export async function POST(request: NextRequest) {
 
     let body: unknown;
     try {
-      body = await request.json();
+      body = parse(await request.text(), (key, value) =>
+        isLosslessNumber(value)
+          ? key === "quantity"
+            ? value.toString()
+            : value.valueOf()
+          : value,
+      );
     } catch {
       throw new RequestError(400, "invalid_json", "Invalid JSON payload");
     }

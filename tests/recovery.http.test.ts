@@ -15,7 +15,7 @@ afterEach(async () => {
   await fetch(`${environment().supabaseUrl}/__reset`, { method: "POST" });
 });
 
-test("a pending attempt is persisted and visible in GET /api/portal/[token] on page reload", async () => {
+test("a pending attempt persists in one-hash lookup without public enumeration", async () => {
   const invoice = await issuedInvoice();
   // Seed transaction evidence but set the RPC offline so verification is deferred.
   await evidence(invoice);
@@ -38,11 +38,13 @@ test("a pending attempt is persisted and visible in GET /api/portal/[token] on p
   const portal = await (
     await request(`/api/portal/${invoice.access_token}`)
   ).json();
-  expect(portal.pendingAttempts).toHaveLength(1);
-  expect(portal.pendingAttempts[0]).toMatchObject({
-    transaction_hash: hash,
-    sender_account: "payer.testnet",
-    outcome: "rpc_unavailable",
+  expect(portal.pendingAttempts).toEqual([]);
+  const lookup = await request(
+    `/api/portal/${invoice.access_token}/lookup?hash=${hash}`,
+  );
+  expect(await lookup.json()).toMatchObject({
+    transactionHash: hash,
+    status: "rpc_unavailable",
   });
 });
 

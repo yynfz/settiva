@@ -131,42 +131,23 @@ const evidenceSchema = z.object({
     )
     .min(1),
 });
-// Rate limit: max 10 distinct attempt hashes per invoice within 10 minutes.
-const RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
-const RATE_LIMIT_MAX = 10;
-
 async function enforceRateLimit(
   db: ReturnType<typeof database>,
   invoiceId: string,
   hash: string,
+  sender: string,
 ) {
-  // Resuming verification for an already-submitted hash is never rate-limited.
-  const { data: existingAttempt } = await db
-    .from("payment_attempts")
-    .select("id")
-    .eq("invoice_id", invoiceId)
-    .eq("transaction_hash", hash)
-    .maybeSingle();
-  if (existingAttempt) return;
-
-  const windowStart = new Date(Date.now() - RATE_LIMIT_WINDOW_MS).toISOString();
-  const result = await db
-    .from("payment_attempts")
-    .select("id")
-    .eq("invoice_id", invoiceId)
-    .neq("transaction_hash", hash)
-    .gte("created_at", windowStart);
-  if (result.error) {
-    // If we can't count attempts, fail open (don't block the payer).
-    console.error("[rate-limit] count failed:", result.error.message);
-    return;
-  }
-  const count = result.data?.length ?? 0;
-  if (count >= RATE_LIMIT_MAX)
+  const result = await db.rpc("reserve_verification", {
+    p_invoice: invoiceId,
+    p_hash: hash,
+    p_sender: sender,
+  });
+  if (result.error) throw result.error;
+  if (!result.data)
     throw new RequestError(
       429,
-      "rate_limited",
-      "Too many verification attempts. Wait before retrying.",
+      "rate_limit",
+      "Too many verification requests. Retry later; do not send another payment.",
     );
 }
 
@@ -192,21 +173,6 @@ async function upsertAttempt(
   );
   // Log silently — attempt persistence must not block or override a payment error.
   if (error) console.error("[attempt] upsert failed:", error.message);
-}
-
-// Recoverable outcomes: the payer can retry verification for these on page reload.
-const RECOVERABLE: string[] = ["pending", "rpc_unavailable"];
-
-export async function pendingAttempts(token: string) {
-  const invoice = await paymentInvoice(token);
-  const { data, error } = await database()
-    .from("payment_attempts")
-    .select("transaction_hash,sender_account,outcome,error_code,created_at")
-    .eq("invoice_id", invoice.id)
-    .in("outcome", RECOVERABLE)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return data ?? [];
 }
 
 export async function verifyPayment(
@@ -245,7 +211,7 @@ export async function verifyPayment(
   }
 
   // Rate limit: guard against hash-enumeration spam on new submissions.
-  await enforceRateLimit(db, invoice.id, hash);
+  await enforceRateLimit(db, invoice.id, hash, sender);
 
   // Persist the attempt as pending before hitting the RPC so the payer
   // can find it on page reload even if the connection drops.
@@ -434,6 +400,8 @@ export async function verifyPayment(
   const timestamp = new Date(
     Number(BigInt(block.header.timestamp_nanosec) / 1000000n),
   ).toISOString();
+  if (new Date(timestamp).getTime() < new Date(invoice.created_at).getTime())
+    throw await mismatch("predates_invoice");
   const saved = await db.rpc("record_verified_payment", {
     p_invoice: invoice.id,
     p_hash: hash,
@@ -669,6 +637,13 @@ export async function verifyRefund(
     Number(BigInt(block.header.timestamp_nanosec) / 1000000n),
   ).toISOString();
 
+  if (
+    refundHash === payment.transaction_hash ||
+    new Date(timestamp).getTime() < new Date(payment.block_timestamp).getTime()
+  )
+    throw mismatch(
+      "Return transfer predates the overpayment or reuses its transaction.",
+    );
   const saved = await db.rpc("record_verified_refund", {
     p_payment_id: payment.id,
     p_refund_hash: refundHash,

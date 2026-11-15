@@ -1,10 +1,6 @@
 import { NextRequest } from "next/server";
 import { getPublicInvoiceByToken } from "@/lib/server/invoices";
-import {
-  appliedReceipt,
-  paymentInvoice,
-  pendingAttempts,
-} from "@/lib/server/payments";
+import { appliedReceipt, paymentInvoice } from "@/lib/server/payments";
 import { failure, respond } from "@/lib/server/merchant";
 
 export async function GET(
@@ -17,13 +13,11 @@ export async function GET(
       getPublicInvoiceByToken(token),
       paymentInvoice(token).catch(() => null),
     ]);
-    const [receipt, pending] = invoice
-      ? await Promise.all([appliedReceipt(invoice), pendingAttempts(token)])
-      : [null, []];
+    const receipt = invoice ? await appliedReceipt(invoice) : null;
     return respond({
       invoice: publicInvoice,
       receipt,
-      pendingAttempts: pending,
+      pendingAttempts: [],
     });
   } catch (error) {
     return failure(error);

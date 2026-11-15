@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": true,
     "skipLibCheck": true,
     "strict": true,
@@ -14,7 +18,9 @@
     "jsx": "react-jsx",
     "incremental": true,
     "paths": {
-      "@/*": ["./*"]
+      "@/*": [
+        "./*"
+      ]
     },
     "plugins": [
       {
@@ -28,7 +34,16 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    ".next/dev/dev/types/**/*.ts"
+    ".next/dev/dev/types/**/*.ts",
+    ".test-cache/next-49437/types/**/*.ts",
+    ".test-cache/next-49437/dev/types/**/*.ts",
+    ".test-cache/next-49487/types/**/*.ts",
+    ".test-cache/next-49487/dev/types/**/*.ts",
+    ".test-cache/next-49557/types/**/*.ts",
+    ".test-cache/next-49557/dev/types/**/*.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules",
+    ".test-cache"
+  ]
 }

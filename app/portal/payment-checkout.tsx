@@ -15,15 +15,60 @@ type PendingAttempt = {
 export function PaymentCheckout({
   token,
   invoice,
-  pendingAttempts = [],
   verificationOnly = false,
 }: {
   token: string;
   invoice: PublicInvoice;
-  pendingAttempts?: PendingAttempt[];
   verificationOnly?: boolean;
 }) {
   const router = useRouter();
+  const storageKey = `settiva:pending:${token}`;
+  const [pendingAttempts, setPendingAttempts] = useState<PendingAttempt[]>([]);
+  const remember = useCallback(
+    (transactionHash: string, senderAccount: string, remove = false) => {
+      try {
+        const known: PendingAttempt[] = JSON.parse(
+          localStorage.getItem(storageKey) || "[]",
+        );
+        const filtered = known.filter(
+          (a) => a.transaction_hash !== transactionHash,
+        );
+        const next = remove
+          ? filtered
+          : [
+              ...filtered,
+              {
+                transaction_hash: transactionHash,
+                sender_account: senderAccount,
+                outcome: "pending",
+                error_code: null,
+                created_at: new Date().toISOString(),
+              },
+            ].slice(-10);
+        localStorage.setItem(storageKey, JSON.stringify(next));
+        setPendingAttempts(next);
+      } catch {
+        /* Manual hash recovery remains available if browser storage is unavailable. */
+      }
+    },
+    [storageKey],
+  );
+  useEffect(() => {
+    try {
+      const known = JSON.parse(localStorage.getItem(storageKey) || "[]");
+      if (Array.isArray(known))
+        setPendingAttempts(
+          known
+            .filter(
+              (a) =>
+                typeof a.transaction_hash === "string" &&
+                /^[1-9A-HJ-NP-Za-km-z]{43,44}$/.test(a.transaction_hash) &&
+                typeof a.sender_account === "string",
+            )
+            .slice(-10),
+        );
+    } catch {}
+  }, [storageKey]);
   const connector = useRef<NearConnector | null>(null);
   const [sender, setSender] = useState("");
   const [connectedAccount, setConnectedAccount] = useState("");
@@ -33,9 +78,10 @@ export function PaymentCheckout({
   const [submitted, setSubmitted] = useState(false);
 
   // Auto-resume verification for any pending attempts on page load.
-  const retried = useRef<Set<string>>(new Set());
+  const retried = useRef<Map<string, number>>(new Map());
   const verify = useCallback(
     async (transactionHash = hash, senderAccount = sender) => {
+      remember(transactionHash, senderAccount);
       setBusy(true);
       setMessage("Checking final settlement…");
       try {
@@ -45,8 +91,22 @@ export function PaymentCheckout({
           body: JSON.stringify({ transactionHash, senderAccount }),
         });
         const result = await response.json();
-        if (!response.ok)
+        if (!response.ok) {
+          if (
+            response.status < 500 &&
+            response.status !== 429 &&
+            ![
+              "pending_confirmation",
+              "rpc_unavailable",
+              "verification_unavailable",
+              "wrong_network",
+              "unavailable",
+            ].includes(result.code)
+          )
+            remember(transactionHash, senderAccount, true);
           throw new Error(result.error || "Verification unavailable.");
+        }
+        remember(transactionHash, senderAccount, true);
         setMessage(
           result.classification === "overpayment"
             ? "An additional matching payment was received. The original receipt remains unchanged; contact the merchant about a refund."
@@ -61,18 +121,25 @@ export function PaymentCheckout({
         setBusy(false);
       }
     },
-    [hash, sender, token, router],
+    [hash, sender, token, router, remember],
   );
 
   useEffect(() => {
-    if (pendingAttempts.length === 0) return;
+    if (busy) return;
     const first = pendingAttempts.find(
-      (a) => !retried.current.has(a.transaction_hash),
+      (a) => (retried.current.get(a.transaction_hash) || 0) < 3,
     );
     if (!first) return;
-    retried.current.add(first.transaction_hash);
-    void verify(first.transaction_hash, first.sender_account);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const count = retried.current.get(first.transaction_hash) || 0;
+    const timer = setTimeout(
+      () => {
+        retried.current.set(first.transaction_hash, count + 1);
+        void verify(first.transaction_hash, first.sender_account);
+      },
+      count === 0 ? 1000 : 5000,
+    );
+    return () => clearTimeout(timer);
+  }, [pendingAttempts, busy, verify]);
 
   async function connect() {
     setBusy(true);

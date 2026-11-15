@@ -51,14 +51,14 @@ export function generateInvoicePdf(
 
   const items: Array<{
     description: string;
-    quantity: number;
+    quantity: string;
     unitPrice: string;
     total: string;
   }> = (
     "items" in invoice && Array.isArray(invoice.items) ? invoice.items : []
   ).map((item: any) => ({
     description: item.description,
-    quantity: Number(item.quantity),
+    quantity: String(item.quantity),
     unitPrice: "unit_price" in item ? item.unit_price : item.unitPrice,
     total: item.total,
   }));

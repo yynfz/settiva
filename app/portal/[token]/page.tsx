@@ -1,8 +1,4 @@
-import {
-  appliedReceipt,
-  paymentInvoice,
-  pendingAttempts,
-} from "@/lib/server/payments";
+import { appliedReceipt, paymentInvoice } from "@/lib/server/payments";
 import { PaymentCheckout } from "../payment-checkout";
 import { notFound } from "next/navigation";
 import { getPublicInvoiceByToken } from "@/lib/server/invoices";
@@ -27,7 +23,6 @@ export default async function CustomerPortalPage({
   }
 
   const receipt = await appliedReceipt(await paymentInvoice(token));
-  const pending = receipt ? [] : await pendingAttempts(token);
   const isOverdue = invoice.isOverdue;
   const statusDisplay =
     isOverdue && invoice.status !== "paid"
@@ -248,13 +243,7 @@ export default async function CustomerPortalPage({
           </div>
         </div>
 
-        {!receipt && (
-          <PaymentCheckout
-            token={token}
-            invoice={invoice}
-            pendingAttempts={pending}
-          />
-        )}
+        {!receipt && <PaymentCheckout token={token} invoice={invoice} />}
         {receipt && (
           <section
             className="bg-white rounded-xl border p-6 mt-6"

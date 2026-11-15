@@ -109,7 +109,7 @@ test("merchant creates an itemized invoice, verifies sequential numbering, atomi
   expect(data1.invoice.items).toHaveLength(2);
   expect(data1.invoice.items[0]).toMatchObject({
     description: "Logo Exploration",
-    quantity: 2,
+    quantity: "2",
     unit_price: "25.50",
     total: "51.00",
   });
@@ -232,7 +232,7 @@ test("Customer Portal: unauthenticated payer reads public invoice, transitions s
     items: [
       {
         description: "Product Strategy",
-        quantity: 1,
+        quantity: "1",
         unitPrice: "250.00",
         total: "250.00",
       },

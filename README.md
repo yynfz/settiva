@@ -71,3 +71,11 @@ Built with Next.js, React, Tailwind CSS, Supabase, NEAR Connect, Zod, PostgreSQL
 License selection is pending the project owner's choice; see `LICENSE` for the current rights status. Dependency licenses remain their respective owners'.
 
 References: [Supabase Auth](https://supabase.com/docs/reference/javascript/auth-admin-createuser), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [NEAR Connect](https://docs.near.org/web3-apps/tutorials/wallet-login), [NEAR transaction finality](https://docs.near.org/api/rpc/transactions), [token/storage standards](https://docs.near.org/primitives/ft/standard), [Circle contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses), [Circle faucet](https://faucet.circle.com/).
+
+## Parent-spec audit and v0.0.2
+
+The parent-spec audit adds transactional invoice issuance with a per-merchant/year sequence, exact four-decimal quantity handling that rejects fractional atomic totals, fresh receiving-account checks at issuance, merchant-only financial history, browser-local recovery of known hashes, settlement chronology checks, and database-serialized verification limits. Public invoice reads do not enumerate pending attempts; a payer can recover a known transfer from the same browser or enter its hash manually, and use one-hash lookup from another browser.
+
+Apply the new pending migrations in order before deploying the corresponding application code: `202611150003_atomic_invoice_issuance.sql`, `202611150004_settlement_chronology.sql`, and `202611150005_verification_limits.sql`. The issuance migration adds uniqueness for `(merchant_id, invoice_number)`. If an older deployment contains duplicate numbers, inspect and resolve them through your operator process before applying it; the migration deliberately stops rather than silently renumbering issued invoices. These migrations are not applied automatically by the release workflow.
+
+The hackathon review build is not a claim that the genuine-evidence or license-choice requirements are complete. Issues #1 and #10 remain open until their outstanding evidence and owner decisions are resolved. The earlier closed feature tickets describe implemented software; no fixture hash is live settlement proof.

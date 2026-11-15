@@ -36,7 +36,7 @@ export type InvoiceItem = {
   id?: string;
   invoice_id?: string;
   description: string;
-  quantity: number;
+  quantity: string;
   unit_price: string;
   total: string;
   sort_order?: number;
@@ -71,7 +71,7 @@ export type Invoice = {
 
 export type PublicInvoiceItem = {
   description: string;
-  quantity: number;
+  quantity: string;
   unitPrice: string;
   total: string;
 };
@@ -98,7 +98,7 @@ export type PublicInvoice = {
 
 export type CreateInvoiceItemInput = {
   description: string;
-  quantity: number;
+  quantity: string;
   unitPrice: string;
 };
 

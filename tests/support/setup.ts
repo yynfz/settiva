@@ -356,7 +356,10 @@ export default async function setup(project: TestProject) {
               result: {
                 header: {
                   hash: "settlement-block",
-                  timestamp_nanosec: "1794618000000000000",
+                  timestamp_nanosec:
+                    rpcScenario === "old-block"
+                      ? "1000000000"
+                      : String(BigInt(Date.now()) * 1000000n),
                 },
               },
             });
@@ -427,6 +430,7 @@ export default async function setup(project: TestProject) {
       ENABLE_MAINNET_PAYMENTS:
         process.env.SETTIVA_MAINNET_ENABLED === "true" ? "true" : "false",
       NEXT_TELEMETRY_DISABLED: "1",
+      SETTIVA_TEST_BUILD_DIR: `.test-cache/next-${appPort}`,
     };
     appEnv.NODE_ENV = "production";
     const build = launch(
