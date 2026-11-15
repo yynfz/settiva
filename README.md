@@ -72,7 +72,7 @@ License selection is pending the project owner's choice; see `LICENSE` for the c
 
 References: [Supabase Auth](https://supabase.com/docs/reference/javascript/auth-admin-createuser), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [NEAR Connect](https://docs.near.org/web3-apps/tutorials/wallet-login), [NEAR transaction finality](https://docs.near.org/api/rpc/transactions), [token/storage standards](https://docs.near.org/primitives/ft/standard), [Circle contracts](https://developers.circle.com/stablecoins/usdc-contract-addresses), [Circle faucet](https://faucet.circle.com/).
 
-## Parent-spec audit and v0.0.2
+## Parent-spec audit and v0.0.3
 
 The parent-spec audit adds transactional invoice issuance with a per-merchant/year sequence, exact four-decimal quantity handling that rejects fractional atomic totals, fresh receiving-account checks at issuance, merchant-only financial history, browser-local recovery of known hashes, settlement chronology checks, and database-serialized verification limits. Public invoice reads do not enumerate pending attempts; a payer can recover a known transfer from the same browser or enter its hash manually, and use one-hash lookup from another browser.
 
