@@ -28,25 +28,7 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    ".next/dev/dev/types/**/*.ts",
-    ".test-cache/next-49437/types/**/*.ts",
-    ".test-cache/next-49437/dev/types/**/*.ts",
-    ".test-cache/next-49487/types/**/*.ts",
-    ".test-cache/next-49487/dev/types/**/*.ts",
-    ".test-cache/next-49557/types/**/*.ts",
-    ".test-cache/next-49557/dev/types/**/*.ts",
-    ".test-cache/next-49738/types/**/*.ts",
-    ".test-cache/next-49738/dev/types/**/*.ts",
-    ".test-cache/next-49976/types/**/*.ts",
-    ".test-cache/next-49976/dev/types/**/*.ts",
-    ".test-cache/next-50011/types/**/*.ts",
-    ".test-cache/next-50011/dev/types/**/*.ts",
-    ".test-cache/next-50360/types/**/*.ts",
-    ".test-cache/next-50360/dev/types/**/*.ts",
-    ".test-cache/next-50654/types/**/*.ts",
-    ".test-cache/next-50654/dev/types/**/*.ts",
-    ".test-cache/next-50695/types/**/*.ts",
-    ".test-cache/next-50695/dev/types/**/*.ts"
+    ".next/dev/dev/types/**/*.ts"
   ],
   "exclude": ["node_modules", ".test-cache"]
 }

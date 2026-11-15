@@ -431,8 +431,18 @@ export default async function setup(project: TestProject) {
         process.env.SETTIVA_MAINNET_ENABLED === "true" ? "true" : "false",
       NEXT_TELEMETRY_DISABLED: "1",
       SETTIVA_TEST_BUILD_DIR: `.test-cache/next-${appPort}`,
+      SETTIVA_TEST_TSCONFIG: `.test-cache/tsconfig-${appPort}.json`,
     };
     appEnv.NODE_ENV = "production";
+    await mkdir(".test-cache", { recursive: true });
+    await writeFile(
+      appEnv.SETTIVA_TEST_TSCONFIG,
+      JSON.stringify({
+        extends: "../tsconfig.json",
+        include: ["../next-env.d.ts", "../**/*.ts", "../**/*.tsx"],
+        exclude: ["../node_modules", "./**"],
+      }),
+    );
     const build = launch(
       process.execPath,
       ["node_modules/next/dist/bin/next", "build", "--webpack"],
