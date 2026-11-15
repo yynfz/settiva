@@ -1,4 +1,5 @@
 "use client";
+import { computeItemTotal } from "../lib/amounts";
 import { InvoiceHistory } from "./invoice-history";
 
 import {
@@ -572,18 +573,37 @@ function InvoiceManager({
   function updateItem(
     index: number,
     field: keyof CreateInvoiceItemInput,
-    value: string | number,
+    value: string,
   ) {
     const updated = [...items];
     updated[index] = { ...updated[index], [field]: value };
     setItems(updated);
   }
 
-  const calculatedTotal = items.reduce((sum, item) => {
-    const qty = Number(item.quantity) || 0;
-    const price = parseFloat(item.unitPrice) || 0;
-    return sum + qty * price;
-  }, 0);
+  let calculatedTotal = "—";
+  try {
+    const total = items
+      .reduce(
+        (sum, item) =>
+          sum +
+          BigInt(
+            computeItemTotal(
+              item.quantity,
+              item.unitPrice,
+              setup.asset.decimals,
+            ).totalAtomic,
+          ),
+        0n,
+      )
+      .toString()
+      .padStart(setup.asset.decimals + 1, "0");
+    calculatedTotal =
+      setup.asset.decimals === 0
+        ? total
+        : `${total.slice(0, -setup.asset.decimals)}.${total.slice(-setup.asset.decimals)}`;
+  } catch {
+    /* Incomplete or invalid line items have no approximate monetary preview. */
+  }
 
   async function handleCreateInvoice(e: FormEvent) {
     e.preventDefault();
@@ -726,11 +746,7 @@ function InvoiceManager({
                         step="any"
                         value={item.quantity}
                         onChange={(e) =>
-                          updateItem(
-                            idx,
-                            "quantity",
-                            parseFloat(e.target.value) || 0,
-                          )
+                          updateItem(idx, "quantity", e.target.value)
                         }
                         required
                       />
@@ -784,7 +800,7 @@ function InvoiceManager({
           >
             <strong>Total Amount:</strong>
             <span style={{ fontSize: "18px", fontWeight: "700" }}>
-              {calculatedTotal.toFixed(2)} {setup.asset.symbol}
+              {calculatedTotal} {setup.asset.symbol}
             </span>
           </div>
 

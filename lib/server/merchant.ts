@@ -1,4 +1,5 @@
 import "server-only";
+import { AmountError } from "../amounts";
 import { createClient } from "@supabase/supabase-js";
 
 export class RequestError extends Error {
@@ -81,7 +82,7 @@ export function respond(data: unknown, status = 200) {
   });
 }
 export function failure(error: unknown) {
-  if (error instanceof RequestError)
+  if (error instanceof RequestError || error instanceof AmountError)
     return respond(
       { error: error.message, code: error.code, details: error.details },
       error.status,

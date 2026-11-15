@@ -95,3 +95,14 @@ test("raw JSON decimal quantities are preserved before numeric conversion", asyn
   });
   expect(rejected.status).toBe(422);
 });
+
+test.each(["abc", "1.2.3", "-1", "0"])(
+  "malformed quantity %s returns validation error",
+  async (quantity) => {
+    await issuedInvoice();
+    expect(
+      (await issue([{ description: "Invalid", quantity, unitPrice: "1" }]))
+        .status,
+    ).toBe(422);
+  },
+);

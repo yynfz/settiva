@@ -30,7 +30,11 @@ const createInvoiceSchema = z
             quantity: z
               .string()
               .regex(/^\d{1,16}(\.\d{1,4})?$/)
-              .refine((value) => BigInt(value.replace(".", "")) > 0n),
+              .refine(
+                (value) =>
+                  /^\d{1,16}(\.\d{1,4})?$/.test(value) &&
+                  BigInt(value.replace(".", "")) > 0n,
+              ),
             unitPrice: z.string().regex(/^\d+(\.\d+)?$/, "Invalid unit price"),
           })
           .strict(),

@@ -1,8 +1,4 @@
 begin;
-alter table public.invoice_items drop constraint invoice_items_quantity_check;
-alter table public.invoice_items alter column quantity type text using quantity::text;
-alter table public.invoice_items add constraint invoice_items_quantity_check check(quantity ~ '^\d{1,16}(\.\d{1,4})?$' and quantity::numeric > 0);
-
 create table public.invoice_counters (
  merchant_id uuid not null references public.merchant_profiles(user_id) on delete cascade,
  year integer not null,
@@ -30,7 +26,7 @@ begin
  insert into public.invoices(merchant_id,invoice_number,access_token,payment_reference,network,token_contract_id,asset_symbol,token_decimals,asset_kind,receiving_account,amount_atomic,amount_display,status,due_date,client_label,description)
  values(p_merchant,'INV-'||yr||'-'||case when seq<10000 then lpad(seq::text,4,'0') else seq::text end,p_terms->>'access_token',p_terms->>'payment_reference','testnet',merchant.token_contract_id,merchant.asset_symbol,merchant.token_decimals,merchant.asset_kind,merchant.testnet_wallet_id,p_terms->>'amount_atomic',p_terms->>'amount_display','unpaid',(p_terms->>'due_date')::date,p_terms->>'client_label',p_terms->>'description') returning * into inv;
  insert into public.invoice_items(invoice_id,description,quantity,unit_price,total,sort_order)
- select inv.id,description,quantity,unit_price,total,sort_order from jsonb_to_recordset(p_items) as x(description text,quantity text,unit_price text,total text,sort_order integer);
+ select inv.id,description,quantity,unit_price,total,sort_order from jsonb_to_recordset(p_items) as x(description text,quantity numeric,unit_price text,total text,sort_order integer);
  select jsonb_agg(to_jsonb(i) order by sort_order) into item_rows from public.invoice_items i where invoice_id=inv.id;
  return to_jsonb(inv)||jsonb_build_object('items',item_rows);
 end;
